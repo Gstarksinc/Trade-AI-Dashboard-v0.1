@@ -1,0 +1,8 @@
+.env
+backups/
+logs/
+__pycache__/
+*.pyc
+node_modules/
+.next/
+models/artifacts/
