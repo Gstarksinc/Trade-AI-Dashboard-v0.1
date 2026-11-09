@@ -125,94 +125,6 @@ def summary():
         return default_summary
 
 
-def generate_fallback_signals(conn=None) -> list:
-    """Generates baseline predictive trade setups derived from the latest market prices."""
-    prices = {}
-    if conn:
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT DISTINCT ON (symbol) symbol, close
-                    FROM candles
-                    ORDER BY symbol, open_time DESC
-                """)
-                for r in cur.fetchall():
-                    prices[r['symbol']] = float(r['close'])
-        except Exception:
-            pass
-
-    # Ensure live prices are fetched from Binance public REST if not yet in database
-    tracked = {'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'}
-    missing = tracked - set(prices.keys())
-    if missing:
-        try:
-            import urllib.request
-            import json
-            req = urllib.request.Request(
-                "https://fapi.binance.com/fapi/v1/ticker/price",
-                headers={"User-Agent": "TradeAI/0.1"}
-            )
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                for item in data:
-                    sym = item.get('symbol')
-                    if sym in missing:
-                        prices[sym] = float(item['price'])
-        except Exception:
-            pass
-
-    # Up-to-date accurate market fallbacks
-    defaults = {
-        'BTCUSDT': 74880.0,
-        'ETHUSDT': 2123.5,
-        'SOLUSDT': 86.68,
-        'BNBUSDT': 686.80,
-        'XRPUSDT': 1.1043,
-        'DOGEUSDT': 0.06975,
-        'LINKUSDT': 10.598,
-        'TRXUSDT': 0.3176,
-    }
-    for k, v in defaults.items():
-        if k not in prices or prices[k] <= 0:
-            prices[k] = v
-
-    now = datetime.now(timezone.utc)
-    configs = [
-        ('BTCUSDT', '1h', 'long', 0.64, 0.76, prices['BTCUSDT'], 0.998, 0.987, 1.022, 820.0, 'open', 12),
-        ('ETHUSDT', '15m', 'short', 0.59, 0.68, prices['ETHUSDT'], 1.002, 1.011, 0.981, 28.5, 'open', 28),
-        ('SOLUSDT', '4h', 'long', 0.67, 0.81, prices['SOLUSDT'], 0.996, 0.968, 1.058, 2.4, 'open', 55),
-        ('BNBUSDT', '1h', 'short', 0.58, 0.70, prices['BNBUSDT'], 1.003, 1.014, 0.978, 7.5, 'open', 82),
-        ('TRXUSDT', '4h', 'long', 0.61, 0.72, prices['TRXUSDT'], 0.995, 0.978, 1.035, 0.007, 'open', 110),
-        ('LINKUSDT', '15m', 'short', 0.56, 0.65, prices['LINKUSDT'], 1.004, 1.025, 0.965, 0.32, 'open', 140),
-        ('XRPUSDT', '15m', 'long', 0.63, 0.78, prices['XRPUSDT'], 0.992, 0.972, 1.042, 0.025, 'open', 210),
-        ('DOGEUSDT', '1h', 'short', 0.54, 0.61, prices['DOGEUSDT'], 1.006, 1.028, 0.955, 0.0022, 'open', 320),
-    ]
-
-    out = []
-    for idx, (sym, tf, dirn, prob, meta, cmp, e_mult, sl_mult, tp_mult, atr_val, status, ago_min) in enumerate(configs, 1):
-        digits = 5 if cmp < 0.1 else (4 if cmp < 1 else (3 if cmp < 20 else (2 if cmp < 1000 else 1)))
-        entry = round(cmp * e_mult, digits)
-        sl = round(cmp * sl_mult, digits)
-        tp = round(cmp * tp_mult, digits)
-        out.append({
-            'id': idx,
-            'symbol': sym,
-            'timeframe': tf,
-            'direction': dirn,
-            'created_at': (now - timedelta(minutes=ago_min)).isoformat(),
-            'probability': prob,
-            'meta_probability': meta,
-            'current_price': cmp,
-            'entry': entry,
-            'stop_loss': sl,
-            'take_profit': tp,
-            'atr': atr_val,
-            'model_version': 'LightGBM-v0.1 + Meta-Filter',
-            'status': status,
-        })
-    return out
-
-
 @app.get('/signals')
 def get_signals(limit: int = Query(default=25, le=100), active_only: bool = Query(default=True)):
     if not DATABASE_URL:
@@ -292,12 +204,8 @@ def get_signals(limit: int = Query(default=25, le=100), active_only: bool = Quer
 
 @app.get('/equity')
 def equity(days: int = Query(default=30, le=90)):
-    default_equity = [
-        {'ts': (datetime.now(timezone.utc) - timedelta(days=d)).isoformat(), 'equity': round(100.0 + (30 - d) * 0.28, 2)}
-        for d in range(30, -1, -2)
-    ]
     if not DATABASE_URL:
-        return default_equity
+        return []
 
     try:
         with get_db() as conn:
@@ -305,12 +213,13 @@ def equity(days: int = Query(default=30, le=90)):
                 cur.execute("""
                     SELECT closed_at as ts, pnl_pct
                     FROM paper_trades
-                    WHERE closed_at >= now() - (%s || ' days')::interval
+                    WHERE closed_at IS NOT NULL
+                      AND closed_at >= now() - (%s || ' days')::interval
                     ORDER BY closed_at ASC
                 """, (days,))
                 rows = cur.fetchall()
                 if not rows:
-                    return default_equity
+                    return []
 
                 running = 100.0
                 curve = [{'ts': (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(), 'equity': 100.0}]
@@ -322,7 +231,7 @@ def equity(days: int = Query(default=30, le=90)):
                     })
                 return curve
     except Exception:
-        return default_equity
+        return []
 
 
 @app.get('/history')
