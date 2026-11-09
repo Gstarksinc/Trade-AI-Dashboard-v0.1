@@ -269,6 +269,8 @@ async function loadRates() {
   };
 }
 
+const TRACKED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'];
+
 export async function loadDashboard() {
   const [tickers, rates] = await Promise.all([
     loadBinanceTickers(),
@@ -279,20 +281,18 @@ export async function loadDashboard() {
 
   const [summary, signals, equity, status, health, history] = await Promise.all([
     get('/summary', s.summary),
-    get('/signals?limit=25', s.signals),
+    get('/signals?limit=25', []),
     get('/equity?days=30', s.equity),
     get('/status', s.status),
     get('/health', null),
-    get('/history', s.history),
+    get('/history', []),
   ]);
 
-  // Use live signals if present; otherwise fall back to predictive setups
-  const rawSignals = (Array.isArray(signals.data) && signals.data.length > 0)
-    ? signals.data
-    : s.signals;
+  // Genuine signals from API only — do not fabricate mock signals as if they were real
+  const apiSignals = Array.isArray(signals.data) ? signals.data : [];
 
-  // Enrich signals with live market price and ensure entry/sl/tp levels are synchronized to actual price scale
-  const enrichedSignals = rawSignals.map((sig) => {
+  // Enrich confirmed signals with live prices and synchronized bounds
+  const confirmedSignals = apiSignals.map((sig) => {
     const tick = tickers[sig.symbol];
     const liveCmp = Number(tick?.price);
     const hasLiveCmp = !isNaN(liveCmp) && liveCmp > 0;
@@ -315,6 +315,7 @@ export async function loadDashboard() {
     const change24h = tick?.change != null ? tick.change : (sig.change_24h || 0);
     return {
       ...sig,
+      is_confirmed: true,
       current_price: cmp,
       entry,
       stop_loss: sl,
@@ -323,25 +324,61 @@ export async function loadDashboard() {
     };
   });
 
+  // Track which monitored symbols have confirmed signals
+  const confirmedSymbols = new Set(confirmedSignals.map((sig) => sig.symbol));
+
+  // Monitored coins that do not yet have a confirmed signal show as "Waiting for confirmation"
+  const unconfirmedSignals = TRACKED_SYMBOLS
+    .filter((sym) => !confirmedSymbols.has(sym))
+    .map((sym) => {
+      const tick = tickers[sym];
+      const cmp = Number(tick?.price) || 0;
+      return {
+        id: `unconfirmed-${sym}`,
+        symbol: sym,
+        timeframe: '—',
+        direction: '—',
+        is_confirmed: false,
+        status: 'waiting_confirmation',
+        status_label: 'Waiting for confirmation',
+        probability: null,
+        meta_probability: null,
+        current_price: cmp,
+        entry: null,
+        stop_loss: null,
+        take_profit: null,
+        atr: null,
+        change_24h: tick?.change != null ? tick.change : 0,
+        model_version: 'LightGBM-v0.1 + Meta-Filter',
+        created_at: null,
+        opened_at: null,
+      };
+    });
+
+  const enrichedSignals = [...confirmedSignals, ...unconfirmedSignals];
+
+  // Genuine history only — record completed trades only, no dummy/fabricated entries
+  const realHistory = Array.isArray(history.data) ? history.data : [];
+
+  const openCount = enrichedSignals.filter((x) => x.is_confirmed && (x.status === 'open' || x.status === 'in_progress')).length;
+
   const finalSummary = {
     ...s.summary,
     ...summary.data,
-    open_signals: (summary.data?.open_signals > 0)
-      ? summary.data.open_signals
-      : enrichedSignals.filter((x) => x.status === 'open').length,
+    open_signals: openCount,
     data_available_days: summary.data?.data_available_days || s.summary.data_available_days || 45,
   };
 
   return {
     summary: finalSummary,
     signals: enrichedSignals,
-    history: Array.isArray(history.data) && history.data.length > 0 ? history.data : s.history,
+    history: realHistory,
     equity: equity.data && equity.data.length > 0 ? equity.data : s.equity,
     status: status.data || s.status,
     health: health.data,
     rates,
     tickers,
     fetchedAt: new Date().toISOString(),
-    sample: !signals.live || !signals.data || signals.data.length === 0,
+    sample: false,
   };
 }

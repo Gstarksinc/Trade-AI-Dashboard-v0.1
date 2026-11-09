@@ -1,12 +1,19 @@
 'use client';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { calcTradeMetrics, fmtPct, fmtTime } from '../lib/format';
+import { calcTradeMetrics, fmtDuration, fmtPct, fmtTime, SIGNAL_PHASES } from '../lib/format';
 import { LastUpdatedBadge, LiveClock, Money, PrefToggles, RateNote, Time, usePrefs } from './prefs';
 
 const TIMEFRAMES = ['All', '15m', '1h', '4h'];
 const DIRECTIONS = ['All', 'Long', 'Short'];
-const STATUS_OPTIONS = ['All', 'In Entry Zone', 'In Trade', 'Pending', 'Target Hit', 'Stopped Out'];
+const STATUS_OPTIONS = [
+  'All',
+  'Waiting for confirmation',
+  'Waiting for entry',
+  'Order in progress',
+  'Win — Target hit',
+  'Loss — Stop loss hit',
+];
 const HISTORY_SPANS = ['Today (24h)', '7 Days', '30 Days', 'All Time'];
 
 export function AutoRefresh({ seconds = 30 }) {
@@ -145,6 +152,14 @@ export function SessionController({ dataDays = 45 }) {
  * Visual Progress Bar showing CMP position relative to Stop Loss, Entry, and Take Profit
  */
 export function TradeLevelBar({ metrics }) {
+  if (!metrics || metrics.isConfirmed === false || metrics.phase === 'WAITING_CONFIRMATION') {
+    return (
+      <div className="trade-bar-wrap unconfirmed-bar" title="Awaiting signal confirmation">
+        <span className="unconfirmed-bar-text">Scanning for setup...</span>
+      </div>
+    );
+  }
+
   const { progressPct = 35 } = metrics || {};
   const isProfit = progressPct > 35;
   const isLoss = progressPct < 35 && progressPct > 0;
@@ -180,6 +195,35 @@ export function TradeLevelBar({ metrics }) {
 }
 
 /**
+ * Universal Lifecycle Status Badge
+ */
+export function StatusBadge({ phase, floatingPnlPct }) {
+  switch (phase) {
+    case 'WAITING_CONFIRMATION':
+      return <span className="badge-status badge-waiting-conf">⏳ Waiting for confirmation</span>;
+    case 'WAITING_ENTRY':
+      return <span className="badge-status badge-waiting-entry">⏱ Waiting for entry</span>;
+    case 'ORDER_IN_PROGRESS':
+      return (
+        <div className="status-progress-wrap">
+          <span className="badge-status badge-in-progress">⚡ Order in progress</span>
+          {floatingPnlPct != null && (
+            <span className={`pnl-chip ${floatingPnlPct >= 0 ? 'pos' : 'neg'}`}>
+              {floatingPnlPct >= 0 ? '+' : ''}{floatingPnlPct.toFixed(2)}%
+            </span>
+          )}
+        </div>
+      );
+    case 'WIN_TARGET_HIT':
+      return <span className="badge-status badge-target-hit">✓ Win — Target hit</span>;
+    case 'LOSS_STOP_HIT':
+      return <span className="badge-status badge-stop-hit">✕ Loss — Stop loss hit</span>;
+    default:
+      return <span className="badge-status badge-waiting-conf">⏳ Waiting for confirmation</span>;
+  }
+}
+
+/**
  * Main Signals & History Panel with Tabs, Filters, and Crash-Proof Handlers
  */
 export function SignalsPanel({ signals = [], history = [] }) {
@@ -192,15 +236,40 @@ export function SignalsPanel({ signals = [], history = [] }) {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('time');
 
+  // Real-time tracking of filled entries and session completed trades
+  const [completedTrades, setCompletedTrades] = useState([]);
+  const enteredAtRef = useRef({});
+  const completedIdsRef = useRef(new Set());
+
   // Defensive array checks
   const signalList = Array.isArray(signals) ? signals : [];
-  const historyList = Array.isArray(history) ? history : [];
+  const baseHistory = Array.isArray(history) ? history : [];
+
+  // Merge history with trades completed during the active session (preserving timestamps)
+  const historyList = useMemo(() => {
+    const existingIds = new Set(baseHistory.map((h) => h.id));
+    const uniqueSessionTrades = completedTrades.filter((t) => !existingIds.has(t.id));
+    return [...uniqueSessionTrades, ...baseHistory];
+  }, [baseHistory, completedTrades]);
 
   // Enrich signals with live market price and metrics
   const enrichedRows = useMemo(() => {
     return signalList.map((sig) => {
+      const isConfirmed = sig?.is_confirmed !== false && sig?.status !== 'waiting_confirmation' && sig?.entry != null;
       const live = getPrice(sig?.symbol, sig?.current_price || sig?.entry);
       const livePrice = live?.price || sig?.current_price || sig?.entry || 0;
+
+      if (!isConfirmed) {
+        const metrics = calcTradeMetrics(sig, livePrice);
+        return {
+          ...sig,
+          is_confirmed: false,
+          livePrice,
+          change_24h: live?.change != null ? live.change : sig?.change_24h,
+          tickDir: live?.tickDir,
+          metrics,
+        };
+      }
 
       let effectiveEntry = sig?.entry;
       let effectiveSl = sig?.stop_loss;
@@ -220,6 +289,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
 
       const syncedSig = {
         ...sig,
+        is_confirmed: true,
         entry: effectiveEntry,
         stop_loss: effectiveSl,
         take_profit: effectiveTp,
@@ -238,6 +308,42 @@ export function SignalsPanel({ signals = [], history = [] }) {
     });
   }, [signalList, getPrice]);
 
+  // Listen for real-time entries and target / stop-loss completions to record trade history
+  useEffect(() => {
+    enrichedRows.forEach((row) => {
+      if (!row || !row.is_confirmed || !row.id) return;
+      const ph = row.metrics?.phase;
+      
+      // Track entry filled timestamp
+      if (ph === 'ORDER_IN_PROGRESS' && !row.opened_at && !enteredAtRef.current[row.id]) {
+        enteredAtRef.current[row.id] = new Date().toISOString();
+      }
+
+      // Record completed trade only when target or stop loss is reached
+      if ((ph === 'WIN_TARGET_HIT' || ph === 'LOSS_STOP_HIT') && !completedIdsRef.current.has(row.id)) {
+        completedIdsRef.current.add(row.id);
+        const isWin = ph === 'WIN_TARGET_HIT';
+        const nowIso = new Date().toISOString();
+        const openedAt = row.opened_at || enteredAtRef.current[row.id] || row.created_at || null;
+        const newTrade = {
+          id: `session-trade-${row.id}-${Date.now()}`,
+          symbol: row.symbol,
+          timeframe: row.timeframe || '1h',
+          direction: row.direction,
+          entry: row.entry,
+          exit_price: isWin ? row.take_profit : row.stop_loss,
+          pnl_pct: isWin ? Number(row.metrics.rewardPct || 0) : -Number(row.metrics.riskPct || 0),
+          exit_reason: isWin ? 'Target Hit' : 'Stop Loss Hit',
+          predicted_at: row.created_at || row.predicted_at || null,
+          opened_at: openedAt,
+          closed_at: nowIso,
+          target_hit_at: isWin ? nowIso : null,
+        };
+        setCompletedTrades((prev) => [newTrade, ...prev]);
+      }
+    });
+  }, [enrichedRows]);
+
   // Filter signals
   const filteredRows = useMemo(() => {
     return enrichedRows.filter((s) => {
@@ -251,14 +357,17 @@ export function SignalsPanel({ signals = [], history = [] }) {
       }
       if (statusFilter !== 'All') {
         const ph = s?.metrics?.phase;
-        if (statusFilter === 'In Entry Zone' && ph !== 'IN_ENTRY_ZONE') return false;
-        if (statusFilter === 'In Trade' && ph !== 'IN_TRADE') return false;
-        if (statusFilter === 'Pending' && ph !== 'WAITING_ENTRY') return false;
-        if (statusFilter === 'Target Hit' && s.status !== 'target_hit' && ph !== 'TARGET_HIT') return false;
-        if (statusFilter === 'Stopped Out' && s.status !== 'stopped' && ph !== 'STOPPED') return false;
+        if (statusFilter === 'Waiting for confirmation' && ph !== 'WAITING_CONFIRMATION') return false;
+        if (statusFilter === 'Waiting for entry' && ph !== 'WAITING_ENTRY') return false;
+        if (statusFilter === 'Order in progress' && ph !== 'ORDER_IN_PROGRESS') return false;
+        if (statusFilter === 'Win — Target hit' && ph !== 'WIN_TARGET_HIT') return false;
+        if (statusFilter === 'Loss — Stop loss hit' && ph !== 'LOSS_STOP_HIT') return false;
       }
       return true;
     }).sort((a, b) => {
+      // Prioritize confirmed signals above unconfirmed pending setups
+      if (a.is_confirmed && !b.is_confirmed) return -1;
+      if (!a.is_confirmed && b.is_confirmed) return 1;
       if (sortBy === 'confidence') return (b.probability || 0) - (a.probability || 0);
       if (sortBy === 'rr') return (b?.metrics?.rrRatio || 0) - (a?.metrics?.rrRatio || 0);
       if (sortBy === 'pnl') return (b?.metrics?.floatingPnlPct || 0) - (a?.metrics?.floatingPnlPct || 0);
@@ -266,7 +375,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
     });
   }, [enrichedRows, tf, direction, search, statusFilter, sortBy]);
 
-  // Filter history
+  // Filter history (honest records: never filter out losses or fabricate numbers)
   const filteredHistory = useMemo(() => {
     const nowMs = Date.now();
     return historyList.filter((h) => {
@@ -405,25 +514,107 @@ export function SignalsPanel({ signals = [], history = [] }) {
                   <th>Expected Target</th>
                   <th>R:R</th>
                   <th style={{ minWidth: '130px' }}>Trade Level Visualizer</th>
-                  <th>Floating P&amp;L / Status</th>
+                  <th>Current Status</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredRows.map((s, idx) => {
-                  const isLong = String(s.direction || '').toLowerCase() === 'long';
                   const m = s.metrics;
                   const tickClass = s.tickDir ? `tick-${s.tickDir}` : '';
-                  const pnlPos = (m?.floatingPnlPct || 0) >= 0;
+                  const isUnconfirmed = !s.is_confirmed || m?.phase === 'WAITING_CONFIRMATION';
+
+                  if (isUnconfirmed) {
+                    return (
+                      <tr key={s.id || s.symbol + idx} className="signal-row unconfirmed-row">
+                        <td>
+                          <div className="sym-cell">
+                            <span className="coin-symbol">{String(s.symbol || '').replace('USDT', '')}</span>
+                            <span className="sym-meta">
+                              <span className="tf-badge pending-badge">—</span>
+                              <span className="sub font-num">Monitoring</span>
+                            </span>
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className="dir-cell text-muted">
+                            <span className="text-dim font-num">—</span>
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className={`cmp-cell ${tickClass}`}>
+                            <div className="cmp-header-row">
+                              <span className="live-dot pulse" />
+                              <span className="cmp-val font-num">
+                                <Money value={s.livePrice} />
+                              </span>
+                            </div>
+                            <div className="cmp-sub-row">
+                              {s.change_24h != null && (
+                                <span className={`change-badge ${s.change_24h >= 0 ? 'pos' : 'neg'}`}>
+                                  {s.change_24h >= 0 ? '▲' : '▼'}{Math.abs(Number(s.change_24h)).toFixed(1)}%
+                                </span>
+                              )}
+                              <span className="cmp-diff-tag">—</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className="level-cell">
+                            <span className="text-muted">—</span>
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className="level-cell">
+                            <span className="text-muted">—</span>
+                          </div>
+                        </td>
+
+                        <td>
+                          <div className="level-cell">
+                            <span className="text-muted">—</span>
+                          </div>
+                        </td>
+
+                        <td>
+                          <span className="text-muted">—</span>
+                        </td>
+
+                        <td>
+                          <TradeLevelBar metrics={m} />
+                        </td>
+
+                        <td>
+                          <StatusBadge phase="WAITING_CONFIRMATION" />
+                        </td>
+
+                        <td>
+                          <button
+                            className="calc-btn disabled"
+                            disabled
+                            title="Awaiting confirmed setup"
+                          >
+                            Pending
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const isLong = String(s.direction || '').toLowerCase() === 'long';
 
                   return (
-                    <tr key={s.id || s.symbol + s.timeframe + idx} className={`signal-row ${s.status}`}>
+                    <tr key={s.id || s.symbol + s.timeframe + idx} className={`signal-row ${s.direction || ''}`}>
                       <td>
                         <div className="sym-cell">
                           <span className="coin-symbol">{String(s.symbol || '').replace('USDT', '')}</span>
                           <span className="sym-meta">
                             <span className="tf-badge">{s.timeframe}</span>
-                            <Time iso={s.created_at} />
+                            {s.created_at ? <Time iso={s.created_at} /> : <span className="sub font-num">—</span>}
                           </span>
                         </div>
                       </td>
@@ -471,12 +662,10 @@ export function SignalsPanel({ signals = [], history = [] }) {
                           <span className="level-val font-num font-bold">
                             <Money value={s.entry} />
                           </span>
-                          <span className={`entry-dist ${m?.phase === 'IN_ENTRY_ZONE' ? 'ready' : ''}`}>
-                            {m?.phase === 'IN_ENTRY_ZONE'
-                              ? '🎯 In Zone'
-                              : (m?.distToEntryPct || 0) > 0
+                          <span className="entry-dist">
+                            {(m?.distToEntryPct || 0) > 0
                               ? `+${m.distToEntryPct.toFixed(2)}% to entry`
-                              : `${(m?.distToEntryPct || 0).toFixed(2)}% past`}
+                              : `${Math.abs(m?.distToEntryPct || 0).toFixed(2)}% past entry`}
                           </span>
                         </div>
                       </td>
@@ -514,20 +703,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
                       </td>
 
                       <td>
-                        {s.status === 'target_hit' ? (
-                          <span className="status-pill hit">✓ Target Hit</span>
-                        ) : s.status === 'stopped' ? (
-                          <span className="status-pill stop">✕ Stopped</span>
-                        ) : m?.phase === 'IN_TRADE' || m?.phase === 'IN_ENTRY_ZONE' ? (
-                          <div className="pnl-cell">
-                            <span className={`pnl-val font-num ${pnlPos ? 'pos' : 'neg'}`}>
-                              {pnlPos ? '+' : ''}{(m?.floatingPnlPct || 0).toFixed(2)}%
-                            </span>
-                            <span className="pnl-label">Unrealized P&amp;L</span>
-                          </div>
-                        ) : (
-                          <span className="status-pill pending">⏳ Pending Entry</span>
-                        )}
+                        <StatusBadge phase={m?.phase} floatingPnlPct={m?.floatingPnlPct} />
                       </td>
 
                       <td>
@@ -553,9 +729,67 @@ export function SignalsPanel({ signals = [], history = [] }) {
         ) : (
           <div className="cards-grid">
             {filteredRows.map((s, idx) => {
-              const isLong = String(s.direction || '').toLowerCase() === 'long';
               const m = s.metrics;
-              const pnlPos = (m?.floatingPnlPct || 0) >= 0;
+              const isUnconfirmed = !s.is_confirmed || m?.phase === 'WAITING_CONFIRMATION';
+
+              if (isUnconfirmed) {
+                return (
+                  <div key={s.id || s.symbol + idx} className="signal-card unconfirmed-card">
+                    <div className="card-top">
+                      <div className="card-coin-info">
+                        <span className="card-symbol">{String(s.symbol || '').replace('USDT', '')}</span>
+                        <span className="card-timeframe">—</span>
+                        <span className="text-dim font-num">Monitoring</span>
+                      </div>
+                      <div className={`card-cmp-box ${s.tickDir ? `tick-${s.tickDir}` : ''}`}>
+                        <span className="cmp-label">
+                          <span className="live-dot pulse" /> LIVE CMP (1s)
+                        </span>
+                        <span className="card-cmp font-num">
+                          <Money value={s.livePrice} />
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="card-ai-row">
+                      <div className="ai-conf-wrap">
+                        <span className="ai-label">AI Status:</span>
+                        <span className="text-dim">Waiting for setup</span>
+                      </div>
+                    </div>
+
+                    <div className="levels-grid">
+                      <div className="level-box">
+                        <span className="box-title">ENTRY</span>
+                        <span className="text-muted">—</span>
+                      </div>
+                      <div className="level-box">
+                        <span className="box-title">STOP LOSS</span>
+                        <span className="text-muted">—</span>
+                      </div>
+                      <div className="level-box">
+                        <span className="box-title">TARGET</span>
+                        <span className="text-muted">—</span>
+                      </div>
+                    </div>
+
+                    <div className="card-bar-section">
+                      <TradeLevelBar metrics={m} />
+                    </div>
+
+                    <div className="card-footer">
+                      <div className="card-status-box">
+                        <StatusBadge phase="WAITING_CONFIRMATION" />
+                      </div>
+                      <button className="calc-btn disabled" disabled>
+                        Pending
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              const isLong = String(s.direction || '').toLowerCase() === 'long';
 
               return (
                 <div key={s.id || s.symbol + s.timeframe + idx} className={`signal-card ${isLong ? 'is-long' : 'is-short'}`}>
@@ -598,7 +832,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
                         <Money value={s.entry} />
                       </span>
                       <span className="box-sub">
-                        {m?.phase === 'IN_ENTRY_ZONE' ? '🎯 In Entry Zone' : `${(m?.distToEntryPct || 0) > 0 ? '+' : ''}${(m?.distToEntryPct || 0).toFixed(2)}%`}
+                        {(m?.distToEntryPct || 0) > 0 ? `+${(m.distToEntryPct).toFixed(2)}%` : `${Math.abs(m?.distToEntryPct || 0).toFixed(2)}% past`}
                       </span>
                     </div>
                     <div className="level-box sl-box">
@@ -623,15 +857,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
 
                   <div className="card-footer">
                     <div className="card-status-box">
-                      {s.status === 'target_hit' ? (
-                        <span className="status-pill hit">✓ Target Hit</span>
-                      ) : s.status === 'stopped' ? (
-                        <span className="status-pill stop">✕ Stopped Out</span>
-                      ) : (
-                        <span className={`pnl-chip ${pnlPos ? 'pos' : 'neg'}`}>
-                          P&amp;L: {pnlPos ? '+' : ''}{(m?.floatingPnlPct || 0).toFixed(2)}%
-                        </span>
-                      )}
+                      <StatusBadge phase={m?.phase} floatingPnlPct={m?.floatingPnlPct} />
                     </div>
                     <button className="calc-btn" onClick={() => openCalculator(s)}>
                       ⚡ Calc Position Size
@@ -647,23 +873,31 @@ export function SignalsPanel({ signals = [], history = [] }) {
         <div className="history-container">
           <div className="history-summary-strip">
             <div className="hist-stat">
-              <span className="sub">Filtered Trades</span>
+              <span className="sub">Recorded Closed Trades</span>
               <span className="font-num font-bold big-stat">{filteredHistory.length}</span>
             </div>
             <div className="hist-stat">
               <span className="sub">Realized Win Rate</span>
               <span className="font-num font-bold text-tp big-stat">
                 {filteredHistory.length > 0
-                  ? (filteredHistory.filter(h => h.pnl_pct > 0).length / filteredHistory.length * 100).toFixed(1) + '%'
+                  ? (filteredHistory.filter((h) => (h.pnl_pct || 0) > 0 || String(h.exit_reason || '').toLowerCase().includes('target')).length / filteredHistory.length * 100).toFixed(1) + '%'
                   : '0.0%'}
               </span>
             </div>
             <div className="hist-stat">
+              <span className="sub">Realized Wins / Losses</span>
+              <span className="font-num font-bold big-stat">
+                <span className="text-tp">{filteredHistory.filter((h) => (h.pnl_pct || 0) > 0 || String(h.exit_reason || '').toLowerCase().includes('target')).length}W</span>
+                {' / '}
+                <span className="text-sl">{filteredHistory.filter((h) => !((h.pnl_pct || 0) > 0 || String(h.exit_reason || '').toLowerCase().includes('target'))).length}L</span>
+              </span>
+            </div>
+            <div className="hist-stat">
               <span className="sub">Cumulative Return</span>
-              <span className="font-num font-bold text-tp big-stat">
+              <span className={`font-num font-bold big-stat ${(filteredHistory.reduce((acc, h) => acc + (h.pnl_pct || 0), 0) >= 0) ? 'text-tp' : 'text-sl'}`}>
                 {filteredHistory.length > 0
-                  ? '+' + filteredHistory.reduce((acc, h) => acc + (h.pnl_pct || 0), 0).toFixed(2) + '%'
-                  : '0.0%'}
+                  ? ((filteredHistory.reduce((acc, h) => acc + (h.pnl_pct || 0), 0) >= 0 ? '+' : '') + filteredHistory.reduce((acc, h) => acc + (h.pnl_pct || 0), 0).toFixed(2) + '%')
+                  : '0.00%'}
               </span>
             </div>
           </div>
@@ -672,50 +906,89 @@ export function SignalsPanel({ signals = [], history = [] }) {
             <table className="signals-table history-table">
               <thead>
                 <tr>
-                  <th>Closed Time</th>
                   <th>Asset &amp; TF</th>
                   <th>Direction</th>
-                  <th>Entry Price</th>
-                  <th>Exit Price</th>
-                  <th>Realized Net Return</th>
-                  <th>Exit Reason</th>
+                  <th>Signal Predicted</th>
+                  <th>Entry Filled</th>
+                  <th>Trade Closed</th>
+                  <th>Entry &amp; Exit</th>
+                  <th>Outcome &amp; Exit Reason</th>
+                  <th>Trade Duration</th>
+                  <th>Time to Target</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredHistory.map((h, i) => {
                   const isLong = String(h.direction || '').toLowerCase() === 'long';
-                  const isProfit = (h.pnl_pct || 0) >= 0;
+                  const isWin = (h.pnl_pct || 0) > 0 || String(h.exit_reason || '').toLowerCase().includes('target');
+                  const targetElapsed = isWin ? fmtDuration(h.opened_at, h.target_hit_at || h.closed_at) : '—';
 
                   return (
-                    <tr key={h.id || i} className="history-row">
-                      <td>
-                        <Time iso={h.closed_at} withDate />
-                      </td>
+                    <tr key={h.id || i} className={`history-row ${isWin ? 'win-row' : 'loss-row'}`}>
                       <td>
                         <div className="sym-cell">
                           <span className="coin-symbol">{String(h.symbol || '').replace('USDT', '')}</span>
-                          <span className="tf-badge">{h.timeframe}</span>
+                          <span className="tf-badge">{h.timeframe || '—'}</span>
                         </div>
                       </td>
+
                       <td>
                         <span className={`dir-badge ${isLong ? 'long' : 'short'}`}>
                           {isLong ? '▲ LONG' : '▼ SHORT'}
                         </span>
                       </td>
+
                       <td>
-                        <Money value={h.entry} />
+                        {h.predicted_at ? (
+                          <Time iso={h.predicted_at} withDate />
+                        ) : (
+                          <span className="text-muted" title="Original prediction timestamp not available">—</span>
+                        )}
                       </td>
+
                       <td>
-                        <Money value={h.exit_price} />
+                        {h.opened_at ? (
+                          <Time iso={h.opened_at} withDate />
+                        ) : (
+                          <span className="text-muted" title="Entry timestamp not recorded">—</span>
+                        )}
                       </td>
+
                       <td>
-                        <span className={`font-num font-bold ${isProfit ? 'text-tp' : 'text-sl'}`}>
-                          {isProfit ? '+' : ''}{Number(h.pnl_pct).toFixed(2)}%
+                        {h.closed_at ? (
+                          <Time iso={h.closed_at} withDate />
+                        ) : (
+                          <span className="text-muted" title="Close timestamp not recorded">—</span>
+                        )}
+                      </td>
+
+                      <td>
+                        <div className="hist-prices">
+                          <span className="price-tag in-tag">In: <Money value={h.entry} /></span>
+                          <span className="price-tag out-tag">Out: <Money value={h.exit_price} /></span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div className="outcome-cell">
+                          <span className={`badge-status ${isWin ? 'badge-target-hit' : 'badge-stop-hit'}`}>
+                            {isWin ? '✓ Win — Target hit' : '✕ Loss — Stop loss hit'}
+                          </span>
+                          <span className={`font-num font-bold ${isWin ? 'text-tp' : 'text-sl'}`}>
+                            {isWin ? '+' : ''}{Number(h.pnl_pct || 0).toFixed(2)}%
+                          </span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span className="font-num duration-cell">
+                          {fmtDuration(h.opened_at, h.closed_at)}
                         </span>
                       </td>
+
                       <td>
-                        <span className={`status-pill ${isProfit ? 'hit' : 'stop'}`}>
-                          {h.exit_reason || (isProfit ? 'Target Hit' : 'Stopped Out')}
+                        <span className="font-num target-elapsed-cell" title={isWin ? 'Elapsed time from entry to target' : 'Stop loss hit before target'}>
+                          {isWin ? targetElapsed : <span className="text-muted">—</span>}
                         </span>
                       </td>
                     </tr>
@@ -725,7 +998,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
             </table>
             {filteredHistory.length === 0 && (
               <div className="empty-state">
-                <p className="sub pad">No trade history recorded for this time range.</p>
+                <p className="sub pad">No completed trade history recorded for this time range.</p>
               </div>
             )}
           </div>

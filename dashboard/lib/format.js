@@ -50,7 +50,37 @@ export function fmtCompact(n) {
 }
 
 /**
- * 100% crash-proof calculation of risk, reward, distances, and visual gauge markers.
+ * Calculates human-readable elapsed duration between two ISO timestamps.
+ * Returns '—' honestly if either timestamp is missing.
+ */
+export function fmtDuration(startIso, endIso) {
+  if (!startIso || !endIso) return '—';
+  try {
+    const s = new Date(startIso).getTime();
+    const e = new Date(endIso).getTime();
+    if (isNaN(s) || isNaN(e) || e < s) return '—';
+    const diffSec = Math.floor((e - s) / 1000);
+    const h = Math.floor(diffSec / 3600);
+    const m = Math.floor((diffSec % 3600) / 60);
+    const sec = diffSec % 60;
+    if (h > 0) return `${h}h ${m}m ${sec}s`;
+    if (m > 0) return `${m}m ${sec}s`;
+    return `${sec}s`;
+  } catch {
+    return '—';
+  }
+}
+
+export const SIGNAL_PHASES = {
+  WAITING_CONFIRMATION: 'Waiting for confirmation',
+  WAITING_ENTRY: 'Waiting for entry',
+  ORDER_IN_PROGRESS: 'Order in progress',
+  WIN_TARGET_HIT: 'Win — Target hit',
+  LOSS_STOP_HIT: 'Loss — Stop loss hit',
+};
+
+/**
+ * 100% crash-proof calculation of risk, reward, distances, and signal lifecycle phase.
  */
 export function calcTradeMetrics(signal, currentPrice) {
   if (!signal) {
@@ -58,7 +88,19 @@ export function calcTradeMetrics(signal, currentPrice) {
       entry: 0, sl: 0, tp: 0, cmp: 0, isLong: true,
       riskAmount: 0, rewardAmount: 0, riskPct: 0, rewardPct: 0, rrRatio: 1,
       distToEntryPct: 0, distToSlPct: 0, distToTpPct: 0, floatingPnlPct: 0,
-      phase: 'PENDING', isTriggered: false, progressPct: 35,
+      phase: 'WAITING_CONFIRMATION', phaseLabel: 'Waiting for confirmation',
+      isConfirmed: false, isTriggered: false, progressPct: 0,
+    };
+  }
+
+  // Unconfirmed monitored coin
+  if (signal.is_confirmed === false || signal.status === 'waiting_confirmation' || !signal.entry) {
+    return {
+      entry: null, sl: null, tp: null, cmp: currentPrice || null, isLong: true,
+      riskAmount: 0, rewardAmount: 0, riskPct: 0, rewardPct: 0, rrRatio: null,
+      distToEntryPct: null, distToSlPct: null, distToTpPct: null, floatingPnlPct: null,
+      phase: 'WAITING_CONFIRMATION', phaseLabel: 'Waiting for confirmation',
+      isConfirmed: false, isTriggered: false, progressPct: 0,
     };
   }
 
@@ -97,44 +139,59 @@ export function calcTradeMetrics(signal, currentPrice) {
     ? ((cmp - entry) / entry) * 100
     : ((entry - cmp) / entry) * 100;
 
-  // Trade phase logic
-  let phase = 'PENDING';
+  // Signal Lifecycle Logic
+  let phase = 'WAITING_ENTRY';
+  let phaseLabel = 'Waiting for entry';
   let isTriggered = false;
 
   const statusStr = String(signal.status || 'open').toLowerCase();
-  if (statusStr === 'target_hit') {
-    phase = 'TARGET_HIT';
-  } else if (statusStr === 'stopped') {
-    phase = 'STOPPED';
+  if (statusStr === 'target_hit' || statusStr === 'win') {
+    phase = 'WIN_TARGET_HIT';
+    phaseLabel = 'Win — Target hit';
+    isTriggered = true;
+  } else if (statusStr === 'stopped' || statusStr === 'stop_loss' || statusStr === 'loss') {
+    phase = 'LOSS_STOP_HIT';
+    phaseLabel = 'Loss — Stop loss hit';
+    isTriggered = true;
   } else {
-    // Check based on CMP
+    // Dynamic market status evaluation based on live CMP
     if (isLong) {
       if (cmp >= tp) {
-        phase = 'TARGET_HIT';
-      } else if (cmp <= sl) {
-        phase = 'STOPPED';
-      } else if (Math.abs(cmp - entry) / entry <= 0.002) {
-        phase = 'IN_ENTRY_ZONE';
+        phase = 'WIN_TARGET_HIT';
+        phaseLabel = 'Win — Target hit';
         isTriggered = true;
-      } else if (cmp > entry) {
-        phase = 'IN_TRADE';
+      } else if (cmp <= sl) {
+        phase = 'LOSS_STOP_HIT';
+        phaseLabel = 'Loss — Stop loss hit';
+        isTriggered = true;
+      } else if (cmp <= entry || signal.status === 'in_progress' || signal.opened_at) {
+        // Entry reached (limit buy triggered)
+        phase = 'ORDER_IN_PROGRESS';
+        phaseLabel = 'Order in progress';
         isTriggered = true;
       } else {
         phase = 'WAITING_ENTRY';
+        phaseLabel = 'Waiting for entry';
+        isTriggered = false;
       }
     } else {
       if (cmp <= tp) {
-        phase = 'TARGET_HIT';
-      } else if (cmp >= sl) {
-        phase = 'STOPPED';
-      } else if (Math.abs(cmp - entry) / entry <= 0.002) {
-        phase = 'IN_ENTRY_ZONE';
+        phase = 'WIN_TARGET_HIT';
+        phaseLabel = 'Win — Target hit';
         isTriggered = true;
-      } else if (cmp < entry) {
-        phase = 'IN_TRADE';
+      } else if (cmp >= sl) {
+        phase = 'LOSS_STOP_HIT';
+        phaseLabel = 'Loss — Stop loss hit';
+        isTriggered = true;
+      } else if (cmp >= entry || signal.status === 'in_progress' || signal.opened_at) {
+        // Entry reached (limit sell triggered)
+        phase = 'ORDER_IN_PROGRESS';
+        phaseLabel = 'Order in progress';
         isTriggered = true;
       } else {
         phase = 'WAITING_ENTRY';
+        phaseLabel = 'Waiting for entry';
+        isTriggered = false;
       }
     }
   }
@@ -179,6 +236,8 @@ export function calcTradeMetrics(signal, currentPrice) {
     distToTpPct,
     floatingPnlPct,
     phase,
+    phaseLabel,
+    isConfirmed: true,
     isTriggered,
     progressPct,
   };

@@ -301,48 +301,52 @@ def equity(days: int = Query(default=30, le=90)):
 
 @app.get('/history')
 def get_history(days: int = Query(default=30, le=365)):
-    default_history = [
-        {'id': 101, 'symbol': 'BTCUSDT', 'timeframe': '1h', 'direction': 'long', 'entry': 74150.0, 'exit_price': 75200.0, 'pnl_pct': 1.42, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
-        {'id': 102, 'symbol': 'ETHUSDT', 'timeframe': '15m', 'direction': 'short', 'entry': 2145.0, 'exit_price': 2108.0, 'pnl_pct': 1.72, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
-        {'id': 103, 'symbol': 'SOLUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 84.50, 'exit_price': 88.60, 'pnl_pct': 4.85, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()},
-        {'id': 104, 'symbol': 'BNBUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 694.0, 'exit_price': 702.5, 'pnl_pct': -1.22, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()},
-        {'id': 105, 'symbol': 'XRPUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 1.065, 'exit_price': 1.118, 'pnl_pct': 4.98, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=28)).isoformat()},
-        {'id': 106, 'symbol': 'DOGEUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 0.0718, 'exit_price': 0.0732, 'pnl_pct': -1.95, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=40)).isoformat()},
-        {'id': 107, 'symbol': 'LINKUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 10.15, 'exit_price': 10.58, 'pnl_pct': 4.24, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=54)).isoformat()},
-        {'id': 108, 'symbol': 'TRXUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 0.308, 'exit_price': 0.321, 'pnl_pct': 4.22, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=68)).isoformat()},
-    ]
     if not DATABASE_URL:
-        return default_history
+        return []
 
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT id, symbol, direction, entry, exit_price, pnl_pct, exit_reason, opened_at, closed_at
-                    FROM paper_trades
-                    WHERE closed_at >= now() - (%s || ' days')::interval
-                    ORDER BY closed_at DESC
+                    SELECT
+                        p.id,
+                        p.symbol,
+                        p.direction,
+                        p.entry,
+                        p.exit_price,
+                        p.pnl_pct,
+                        p.exit_reason,
+                        p.opened_at,
+                        p.closed_at,
+                        s.created_at as predicted_at,
+                        coalesce(s.timeframe, '1h') as timeframe
+                    FROM paper_trades p
+                    LEFT JOIN signals s ON s.id = p.signal_id
+                    WHERE p.closed_at >= now() - (%s || ' days')::interval
+                    ORDER BY p.closed_at DESC
                     LIMIT 100
                 """, (days,))
                 rows = cur.fetchall()
                 if not rows:
-                    return default_history
+                    return []
                 out = []
                 for r in rows:
                     out.append({
                         'id': r['id'],
                         'symbol': r['symbol'],
-                        'timeframe': '1h',
+                        'timeframe': r['timeframe'],
                         'direction': r['direction'],
                         'entry': float(r['entry']),
-                        'exit_price': float(r['exit_price']),
-                        'pnl_pct': float(r['pnl_pct']),
-                        'exit_reason': r['exit_reason'] or 'Closed',
+                        'exit_price': float(r['exit_price']) if r['exit_price'] is not None else float(r['entry']),
+                        'pnl_pct': float(r['pnl_pct']) if r['pnl_pct'] is not None else 0.0,
+                        'exit_reason': r['exit_reason'] or ('Target Hit' if (r['pnl_pct'] or 0) > 0 else 'Stop Loss Hit'),
+                        'opened_at': r['opened_at'].isoformat() if r['opened_at'] else None,
                         'closed_at': r['closed_at'].isoformat() if r['closed_at'] else None,
+                        'predicted_at': r['predicted_at'].isoformat() if r.get('predicted_at') else None,
                     })
                 return out
     except Exception:
-        return default_history
+        return []
 
 
 @app.post('/session/reset')

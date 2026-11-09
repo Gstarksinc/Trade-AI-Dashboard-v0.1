@@ -1749,3 +1749,146 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   SIGNAL LIFECYCLE & PERFORMANCE-HISTORY STYLES
+   ========================================================================== */
+
+/* Universal Lifecycle Badges */
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+/* 1. Waiting for confirmation */
+.badge-waiting-conf {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  color: #facc15;
+}
+
+/* 2. Waiting for entry */
+.badge-waiting-entry {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+/* 3. Order in progress */
+.badge-in-progress {
+  background: rgba(129, 140, 248, 0.15);
+  border: 1px solid rgba(129, 140, 248, 0.4);
+  color: #a5b4fc;
+}
+
+/* 4. Win — Target hit */
+.badge-target-hit {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+/* 5. Loss — Stop loss hit */
+.badge-stop-hit {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+/* Unconfirmed row & card styling */
+.unconfirmed-row {
+  opacity: 0.78;
+  background: rgba(255, 255, 255, 0.015);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.unconfirmed-row:hover {
+  opacity: 0.95;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.unconfirmed-card {
+  opacity: 0.8;
+  border-style: dashed !important;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.unconfirmed-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.unconfirmed-bar-text {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.status-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.calc-btn.disabled, .calc-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+}
+
+/* Performance & Trade History Table */
+.history-table th {
+  white-space: nowrap;
+}
+.hist-prices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+.price-tag {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.price-tag.in-tag {
+  color: var(--text-muted);
+}
+.price-tag.out-tag {
+  font-weight: 700;
+  color: var(--text-main);
+}
+.outcome-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.duration-cell, .target-elapsed-cell {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.duration-cell {
+  color: #38bdf8;
+}
+.target-elapsed-cell {
+  color: #4ade80;
+}
