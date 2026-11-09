@@ -1,2 +1,2 @@
-# collector (planned)
-Binance Futures backfill (REST and data.binance.vision bulk files) plus live websocket streams into TimescaleDB. Entry point: `python -m collector.main`.
+# collector
+Binance USD-M Futures data collector. See [docs/COLLECTOR.md](../docs/COLLECTOR.md). Entry point: `python -m collector.main`.

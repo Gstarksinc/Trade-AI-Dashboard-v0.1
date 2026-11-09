@@ -3,7 +3,7 @@
 ## Phase 1: build and test
 
 1. **Infrastructure** (done): Compose stack, schema, API health, dashboard shell.
-2. **Collector:** backfill 2-3 years of 15m/1h/4h klines and funding; start recording open interest, long/short ratio, taker volume and live streams immediately.
+2. **Collector** (built; verify against live Binance data): backfill 2-3 years of 15m/1h/4h klines and funding; start recording open interest, long/short ratio, taker volume and live streams immediately.
 3. **Universe:** top coins from CoinGecko intersected with Binance USDT perpetuals; exclude stablecoins and wrapped tokens. Start with 5-30 liquid symbols.
 4. **Features and labels:** build the dataset, triple-barrier labels, check for leakage.
 5. **LightGBM baseline and walk-forward backtest** including all costs. If there is no edge after costs, fix features and labels before adding anything else.

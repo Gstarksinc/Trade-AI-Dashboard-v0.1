@@ -13,8 +13,8 @@ A self-hosted crypto futures signal system and dashboard: Binance Futures market
 | API `/health` | Done |
 | Next.js dashboard (live health, sample data until API endpoints exist) | Done |
 | API endpoints `/summary`, `/signals`, `/equity`, `/status` | Planned |
-| Collector (Binance backfill and live streams) | Planned |
-| Features, labeling, models, backtest, risk engine | Planned |
+| Collector (Binance backfill and live polling, unit tested, verify against live data) | Done |
+| Features, labeling, models, backtest, risk engine | Planned (next: features and labels) |
 | Telegram notifier | Planned |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the build order.
@@ -58,7 +58,9 @@ docker/python.Dockerfile  Python image with TA-Lib built from source
 db/init/001_schema.sql    TimescaleDB schema (runs on first start of an empty volume)
 api/                      FastAPI service
 dashboard/                Next.js dashboard
-collector/ features/ labeling/ models/ backtest/ risk/ notifier/   planned modules
+collector/                Binance data collector (done)
+features/ labeling/ models/ backtest/ risk/ notifier/   planned modules
+tests/                    unit tests (`python -m unittest discover -s tests`)
 scripts/                  gen_env.sh, backup.sh
 docs/                     setup, architecture, dashboard API contract, roadmap
 ```
@@ -74,6 +76,7 @@ docs/                     setup, architecture, dashboard API contract, roadmap
 ## Documentation
 
 - [Debian setup guide](docs/SETUP_DEBIAN.md)
+- [Collector](docs/COLLECTOR.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Dashboard API contract](docs/DASHBOARD_API.md)
 - [Roadmap and pass/fail criteria](docs/ROADMAP.md)
