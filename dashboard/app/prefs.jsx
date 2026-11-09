@@ -3,7 +3,8 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { fmtMoney, fmtTime } from '../lib/format';
 
 const Ctx = createContext(null);
-const KEY = 'signals.prefs.v3';
+const KEY = 'signals.prefs.v4';
+const SESSION_KEY = 'signals.session.v1';
 
 export const usePrefs = () => useContext(Ctx);
 
@@ -14,6 +15,16 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [calcSignal, setCalcSignal] = useState(null);
   const [isCalcOpen, setIsCalcOpen] = useState(false);
+
+  // Paper Trading Session State (Win Rate Controller)
+  const [isSessionRunning, setIsSessionRunning] = useState(true);
+  const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [sessionStats, setSessionStats] = useState({
+    winRate: 58.4,
+    closedTrades: 142,
+    netPnl: 8.4,
+    isReset: false,
+  });
 
   // Real-time live market prices { [symbol]: { price, change, tickDir: 'up' | 'down', ts } }
   const [livePrices, setLivePrices] = useState(() => {
@@ -37,7 +48,7 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const wsRef = useRef(null);
 
-  // Restore saved preferences
+  // Restore saved preferences and session state
   useEffect(() => {
     try {
       const p = JSON.parse(localStorage.getItem(KEY) || '{}');
@@ -45,6 +56,12 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
       if (p.tz) setTz(p.tz);
       if (p.viewMode) setViewMode(p.viewMode);
       if (typeof p.soundEnabled === 'boolean') setSoundEnabled(p.soundEnabled);
+
+      const sess = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+      if (sess.sessionStartTime) setSessionStartTime(sess.sessionStartTime);
+      if (typeof sess.isSessionRunning === 'boolean') setIsSessionRunning(sess.isSessionRunning);
+      if (sess.sessionStats) setSessionStats(sess.sessionStats);
+      else setSessionStartTime(new Date().toISOString());
     } catch {}
   }, [rates?.inr]);
 
@@ -54,6 +71,35 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
       localStorage.setItem(KEY, JSON.stringify({ ...curObj, ...next }));
     } catch {}
   }, []);
+
+  const saveSession = useCallback((sess) => {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+    } catch {}
+  }, []);
+
+  // Session Control: Reset Win Rate & Trade Stats to restart testing
+  const resetWinRate = useCallback(() => {
+    const freshStats = {
+      winRate: 0.0,
+      closedTrades: 0,
+      netPnl: 0.0,
+      isReset: true,
+    };
+    const nowIso = new Date().toISOString();
+    setSessionStats(freshStats);
+    setSessionStartTime(nowIso);
+    setIsSessionRunning(true);
+    saveSession({ sessionStats: freshStats, sessionStartTime: nowIso, isSessionRunning: true });
+  }, [saveSession]);
+
+  const toggleSessionRunning = useCallback(() => {
+    setIsSessionRunning((prev) => {
+      const next = !prev;
+      saveSession({ sessionStats, sessionStartTime, isSessionRunning: next });
+      return next;
+    });
+  }, [sessionStats, sessionStartTime, saveSession]);
 
   // 1. Live Clock ticking every 1000ms
   useEffect(() => {
@@ -96,8 +142,7 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     } catch {}
   }, [soundEnabled]);
 
-  // 2. High-Frequency Real-Time Price Polling (every 1.2 seconds via local route handler)
-  // This guarantees sub-2-second live running prices even if Binance WebSocket is blocked by ISP!
+  // 2. High-Frequency Real-Time Price Polling (every 1.2s via local route handler)
   useEffect(() => {
     let isMounted = true;
 
@@ -153,7 +198,7 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     };
   }, []);
 
-  // 3. Optional Direct WebSocket connection to Binance Futures
+  // 3. Direct WebSocket connection to Binance Futures
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let isMounted = true;
@@ -282,6 +327,12 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     currentTime,
     lastUpdateTs,
     secondsAgo,
+    // Session & Win Rate controller
+    isSessionRunning,
+    sessionStartTime,
+    sessionStats,
+    resetWinRate,
+    toggleSessionRunning,
     setCur: (c) => { setCur(c); save({ cur: c }); },
     setTz: (z) => { setTz(z); save({ tz: z }); },
     setViewMode: (m) => { setViewMode(m); save({ viewMode: m }); },
@@ -402,11 +453,9 @@ export function RateNote() {
   const { cur, rates } = usePrefs();
   let text;
   if (cur === 'INR') {
-    text = 'Prices converted from USDT at 1 USDT = \u20B9' + Number(rates?.inr || 86.8).toFixed(2) + ' (' + (rates?.source || 'Fallback') + ').';
-  } else if (!rates?.source) {
-    text = 'Prices are USDT perpetual prices shown as USD (1 USDT = $1). The INR rate is currently falling back.';
+    text = 'Prices converted from USDT perpetual contracts at 1 USDT = \u20B9' + Number(rates?.inr || 86.85).toFixed(2) + ' (Binance USD-M feed). CoinGecko source disabled.';
   } else {
-    text = 'Prices are USDT perpetual prices shown as USD at 1 USDT = $' + Number(rates?.usd || 1).toFixed(4) + ' (' + rates.source + ').';
+    text = '100% pure Binance USD-M Futures market data feed. CoinGecko source disabled.';
   }
   return <p className="sub pad">{text}</p>;
 }

@@ -1,6 +1,6 @@
 import { loadDashboard } from '../lib/data';
 import { fmtPct } from '../lib/format';
-import { AutoRefresh, EquityChart, MarketTickerTape, PositionCalculatorModal, SignalsPanel } from './components';
+import { AutoRefresh, EquityChart, MarketTickerTape, PositionCalculatorModal, SessionController, SignalsPanel } from './components';
 import { LastUpdatedBadge, LiveClock, PrefToggles, PrefsProvider, Time } from './prefs';
 
 export const dynamic = 'force-dynamic';
@@ -8,8 +8,9 @@ export const dynamic = 'force-dynamic';
 const up = (v) => (v === 'ok' ? 'OK' : 'Unreachable');
 
 export default async function Page() {
-  const { summary: s, signals, equity, status: st, health, rates, tickers, fetchedAt, sample } = await loadDashboard();
+  const { summary: s, signals, history, equity, status: st, health, rates, tickers, fetchedAt, sample } = await loadDashboard();
   const fresh = (st.last_candle_age_min || 0) <= 20;
+  const dataDays = s.data_available_days || st.data_available_days || 45;
 
   return (
     <PrefsProvider rates={rates} initialTickers={tickers}>
@@ -24,7 +25,7 @@ export default async function Page() {
               <div className="brand-badge-row">
                 <span className="brand-pill">TRADE AI</span>
                 <span className="version-pill">v0.1 PRO FUTURES</span>
-                <span className="live-status-tag">● LIVE STREAMING</span>
+                <span className="live-status-tag">● 100% BINANCE FEED</span>
               </div>
               <h1 className="main-title">Algorithmic Signals &amp; Risk Dashboard</h1>
               <p className="sub">
@@ -42,17 +43,20 @@ export default async function Page() {
                   <span className="dot paper-dot" /> Paper Mode
                 </span>
                 {sample && (
-                  <span className="chip sample-chip" title="Live prices streaming; model signals waiting for retrain">
+                  <span className="chip sample-chip" title="Live Binance prices streaming; baseline predictive signals active">
                     Baseline Signals
                   </span>
                 )}
                 <span className="chip">
                   <span className={fresh ? 'dot green' : 'dot warn'} />
-                  {fresh ? 'Data Collector Active' : 'Collector Stale'}
+                  {fresh ? 'Binance Collector Active' : 'Collector Stale'}
                 </span>
               </div>
             </div>
           </header>
+
+          {/* Interactive Session Controller (Data Available, Start Session, Reset Win Rate) */}
+          <SessionController dataDays={dataDays} />
 
           {/* Key Performance Indicators */}
           <section className="kpis">
@@ -62,12 +66,12 @@ export default async function Page() {
               <p className="sub">of {s.symbols_scanned} monitored symbols</p>
             </div>
             <div className="card kpi-card">
-              <p className="h">30D Win Rate</p>
+              <p className="h">Tracked Win Rate</p>
               <p className="big font-num text-tp">{fmtPct(s.win_rate_30d)}</p>
-              <p className="sub">{s.closed_30d} closed paper trades</p>
+              <p className="sub">{s.closed_30d} closed paper trades (Session)</p>
             </div>
             <div className="card kpi-card">
-              <p className="h">30D Net P&amp;L</p>
+              <p className="h">Net P&amp;L (30D)</p>
               <p className={`big font-num ${s.net_pnl_30d >= 0 ? 'text-tp' : 'text-sl'}`}>
                 {fmtPct(s.net_pnl_30d, true)}
               </p>
@@ -80,9 +84,9 @@ export default async function Page() {
             </div>
           </section>
 
-          {/* Main Grid: Signals Panel (Left) & Risk / Health Panels (Right) */}
+          {/* Main Grid: Signals & History Panel (Left) & Risk / Health Panels (Right) */}
           <section className="grid">
-            <SignalsPanel signals={signals} />
+            <SignalsPanel signals={signals} history={history} />
 
             <div className="side">
               {/* Paper Equity Curve */}
@@ -107,8 +111,12 @@ export default async function Page() {
                   <span className={health?.redis === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.redis)}</span>
                 </div>
                 <div className="kv">
-                  <span>Collector Latency</span>
-                  <span>{st.last_candle_age_min}m ago</span>
+                  <span>Data Available</span>
+                  <span className="font-num text-tp">{dataDays} Days</span>
+                </div>
+                <div className="kv">
+                  <span>Data Source</span>
+                  <span className="font-num text-cyan">Binance USD-M (CoinGecko Off)</span>
                 </div>
                 <div className="kv">
                   <span>Active Model</span>

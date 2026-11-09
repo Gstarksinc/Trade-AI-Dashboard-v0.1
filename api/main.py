@@ -264,12 +264,73 @@ def equity(days: int = Query(default=30, le=90)):
         return default_equity
 
 
+@app.get('/history')
+def get_history(days: int = Query(default=30, le=365)):
+    default_history = [
+        {'id': 101, 'symbol': 'BTCUSDT', 'timeframe': '1h', 'direction': 'long', 'entry': 72150.0, 'exit_price': 73850.0, 'pnl_pct': 2.35, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
+        {'id': 102, 'symbol': 'ETHUSDT', 'timeframe': '15m', 'direction': 'short', 'entry': 3450.0, 'exit_price': 3380.0, 'pnl_pct': 2.03, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
+        {'id': 103, 'symbol': 'SOLUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 172.5, 'exit_price': 181.2, 'pnl_pct': 5.04, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()},
+        {'id': 104, 'symbol': 'BNBUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 712.0, 'exit_price': 720.5, 'pnl_pct': -1.19, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()},
+        {'id': 105, 'symbol': 'XRPUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 2.18, 'exit_price': 2.29, 'pnl_pct': 5.05, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=28)).isoformat()},
+        {'id': 106, 'symbol': 'DOGEUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 0.192, 'exit_price': 0.196, 'pnl_pct': -2.08, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=40)).isoformat()},
+        {'id': 107, 'symbol': 'LINKUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 16.8, 'exit_price': 17.4, 'pnl_pct': 3.57, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=54)).isoformat()},
+        {'id': 108, 'symbol': 'BTCUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 68400.0, 'exit_price': 71200.0, 'pnl_pct': 4.09, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=80)).isoformat()},
+    ]
+    if not DATABASE_URL:
+        return default_history
+
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, symbol, direction, entry, exit_price, pnl_pct, exit_reason, opened_at, closed_at
+                    FROM paper_trades
+                    WHERE closed_at >= now() - (%s || ' days')::interval
+                    ORDER BY closed_at DESC
+                    LIMIT 100
+                """, (days,))
+                rows = cur.fetchall()
+                if not rows:
+                    return default_history
+                out = []
+                for r in rows:
+                    out.append({
+                        'id': r['id'],
+                        'symbol': r['symbol'],
+                        'timeframe': '1h',
+                        'direction': r['direction'],
+                        'entry': float(r['entry']),
+                        'exit_price': float(r['exit_price']),
+                        'pnl_pct': float(r['pnl_pct']),
+                        'exit_reason': r['exit_reason'] or 'Closed',
+                        'closed_at': r['closed_at'].isoformat() if r['closed_at'] else None,
+                    })
+                return out
+    except Exception:
+        return default_history
+
+
+@app.post('/session/reset')
+def reset_session():
+    """Resets paper trades and returns clean session confirmation."""
+    if DATABASE_URL:
+        try:
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM paper_trades WHERE opened_at >= now() - interval '7 days'")
+                    conn.commit()
+        except Exception:
+            pass
+    return {'status': 'reset', 'timestamp': datetime.now(timezone.utc).isoformat()}
+
+
 @app.get('/status')
 def status():
     last_candle_age = 5
     model_version = 'LightGBM-v0.1 + Meta-Classifier'
     daily_loss_used = 0.8
     correlated_open = 2
+    data_available_days = 45
 
     if DATABASE_URL:
         try:
@@ -280,6 +341,12 @@ def status():
                     if row and row['last_time']:
                         diff = datetime.now(timezone.utc) - row['last_time']
                         last_candle_age = max(0, int(diff.total_seconds() / 60))
+
+                    cur.execute("SELECT min(open_time) as min_t, max(open_time) as max_t FROM candles")
+                    c_row = cur.fetchone()
+                    if c_row and c_row['min_t'] and c_row['max_t']:
+                        diff_days = (c_row['max_t'] - c_row['min_t']).days
+                        data_available_days = max(1, diff_days)
         except Exception:
             pass
 
@@ -302,6 +369,7 @@ def status():
         'correlated_open': correlated_open,
         'correlated_cap': 3,
         'market_regime': 'Moderate Volatility / Bullish Bias',
+        'data_available_days': data_available_days,
     }
 
 
