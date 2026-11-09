@@ -34,3 +34,8 @@ td { font-size: 14px; border-bottom: 1px solid #1F262F; }
 .kv { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #1F262F; font-size: 14px; }
 .kv:last-child { border-bottom: 0; }
 .kv span:first-child { color: #9AA4B2; }
+.seg { display: inline-flex; }
+.seg .tf { border-radius: 0; min-width: 56px; }
+.seg .tf:first-child { border-radius: 8px 0 0 8px; }
+.seg .tf:last-child { border-radius: 0 8px 8px 0; }
+.tf:disabled { opacity: .5; cursor: not-allowed; }

@@ -10,6 +10,6 @@ REDIS_URL = os.environ.get('REDIS_URL', '')
 BINANCE_FAPI_URL = os.environ.get('BINANCE_FAPI_URL', 'https://fapi.binance.com').rstrip('/')
 
 # Mutable on purpose: main.py removes symbols that are not tradable USDT perpetuals.
-SYMBOLS = [s.upper() for s in _list('SYMBOLS', 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT')]
+SYMBOLS = [s.upper() for s in _list('SYMBOLS', 'BTCUSDT,ETHUSDT,BNBUSDT,XRPUSDT,SOLUSDT,TRXUSDT,DOGEUSDT,LINKUSDT')]
 TIMEFRAMES = _list('TIMEFRAMES', '15m,1h,4h')
 BACKFILL_YEARS = float(os.environ.get('BACKFILL_YEARS', '2'))

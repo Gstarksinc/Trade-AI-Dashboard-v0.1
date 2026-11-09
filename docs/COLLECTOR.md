@@ -15,6 +15,10 @@ Collects public Binance USD-M Futures data into TimescaleDB. No API key is neede
 
 Binance serves only about 30 days of open interest, long/short and taker data, so these series start building history from the day you first run the collector. Liquidations and order book data are not collected yet.
 
+## Coin list and USDT
+
+The initial coin list is BTC, ETH, BNB, XRP, SOL, TRX, DOGE and LINK, each as a USDT perpetual. USDT is the quote currency of every contract, so it has no tradable USDT perpetual and cannot be a signal coin. The dashboard uses the USDT price (via CoinGecko) as the USD and INR conversion rate. To monitor a ninth coin, append its symbol to `SYMBOLS` (for example `ADAUSDT`) and restart the collector. All timestamps are stored in UTC.
+
 ## How it runs
 
 1. **Validate:** symbols in `SYMBOLS` that are not tradable USDT perpetuals are dropped with an error in the log.
@@ -28,7 +32,7 @@ Requests retry with backoff, honor `Retry-After` on HTTP 429/418, and pause when
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SYMBOLS` | BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT | Coins to collect |
+| `SYMBOLS` | BTCUSDT,ETHUSDT,BNBUSDT,XRPUSDT,SOLUSDT,TRXUSDT,DOGEUSDT,LINKUSDT | Coins to collect (8 perpetuals; USDT itself has no futures market, see below) |
 | `TIMEFRAMES` | 15m,1h,4h | Candle timeframes, also used as the metric periods |
 | `BACKFILL_YEARS` | 2 | Candle and funding history to fetch |
 

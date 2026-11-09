@@ -11,7 +11,7 @@ A self-hosted crypto futures signal system and dashboard: Binance Futures market
 | Docker Compose stack (TimescaleDB, Redis, FastAPI) | Done |
 | Database schema (6 hypertables, signals, paper trades) | Done |
 | API `/health` | Done |
-| Next.js dashboard (live health, sample data until API endpoints exist) | Done |
+| Next.js dashboard (USD/INR and UTC/IST switches; live health, sample data until API endpoints exist) | Done |
 | API endpoints `/summary`, `/signals`, `/equity`, `/status` | Planned |
 | Collector (Binance backfill and live polling, unit tested, verify against live data) | Done |
 | Features, labeling, models, backtest, risk engine | Planned (next: features and labels) |

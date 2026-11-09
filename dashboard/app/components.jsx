@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { fmtPrice } from '../lib/format';
+import { Money, RateNote, Time } from './prefs';
 
 const FILTERS = ['All', '15m', '1h', '4h'];
 const STATUS = { open: 'Open', target_hit: 'Target hit', stopped: 'Stopped out' };
@@ -34,22 +34,23 @@ export function SignalsPanel({ signals }) {
         <table>
           <thead>
             <tr>
-              <th>Symbol</th><th>TF</th><th>Direction</th><th>Confidence</th>
+              <th>Time</th><th>Symbol</th><th>TF</th><th>Direction</th><th>Confidence</th>
               <th>Entry</th><th>Stop</th><th>Target</th><th>Status</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((s, i) => (
               <tr key={s.symbol + s.timeframe + i}>
+                <td><Time iso={s.created_at} withDate /></td>
                 <td>{s.symbol}</td>
                 <td>{s.timeframe}</td>
                 <td className={String(s.direction).toLowerCase()}>
                   {String(s.direction).toLowerCase() === 'long' ? 'Long' : 'Short'}
                 </td>
                 <td>{Math.round(s.probability * 100)}%</td>
-                <td>{fmtPrice(s.entry)}</td>
-                <td>{fmtPrice(s.stop_loss)}</td>
-                <td>{fmtPrice(s.take_profit)}</td>
+                <td><Money value={s.entry} /></td>
+                <td><Money value={s.stop_loss} /></td>
+                <td><Money value={s.take_profit} /></td>
                 <td>{STATUS[s.status] || s.status}</td>
               </tr>
             ))}
@@ -57,6 +58,7 @@ export function SignalsPanel({ signals }) {
         </table>
         {rows.length === 0 && <p className="sub pad">No signals for this timeframe yet.</p>}
       </div>
+      <RateNote />
     </div>
   );
 }

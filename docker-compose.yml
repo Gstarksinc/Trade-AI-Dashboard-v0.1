@@ -84,6 +84,9 @@ services:
     restart: unless-stopped
     environment:
       API_URL: http://api:8000
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      COINGECKO_BASE_URL: ${COINGECKO_BASE_URL:-https://api.coingecko.com/api/v3}
+      USDT_INR_FALLBACK: ${USDT_INR_FALLBACK:-}
     ports:
       - '3000:3000'
     depends_on:

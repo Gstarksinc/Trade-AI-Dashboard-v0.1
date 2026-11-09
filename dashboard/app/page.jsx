@@ -1,15 +1,17 @@
 import { loadDashboard } from '../lib/data';
 import { fmtPct } from '../lib/format';
 import { AutoRefresh, EquityChart, SignalsPanel } from './components';
+import { PrefToggles, PrefsProvider, Time } from './prefs';
 
 export const dynamic = 'force-dynamic';
 
 const up = (v) => (v === 'ok' ? 'OK' : 'Unreachable');
 
 export default async function Page() {
-  const { summary: s, signals, equity, status: st, health, sample } = await loadDashboard();
+  const { summary: s, signals, equity, status: st, health, rates, fetchedAt, sample } = await loadDashboard();
   const fresh = st.last_candle_age_min <= 20;
   return (
+    <PrefsProvider rates={rates}>
     <main className="page">
       <div className="wrap">
         <header className="top">
@@ -18,8 +20,10 @@ export default async function Page() {
             <p className="sub">Crypto futures: 15m, 1h and 4h signals across {s.symbols_scanned} symbols</p>
           </div>
           <div className="chips">
+            <PrefToggles />
             <span className="chip">Paper mode</span>
             {sample && <span className="chip">Sample data</span>}
+            <span className="chip">Updated <Time iso={fetchedAt} /></span>
             <span className="chip"><span className={fresh ? 'dot' : 'dot warn'} />{fresh ? 'Collector healthy' : 'Collector stale'}</span>
           </div>
         </header>
@@ -45,7 +49,7 @@ export default async function Page() {
               <div className="kv"><span>Redis cache</span><span>{up(health && health.redis)}</span></div>
               <div className="kv"><span>Last 15m candle</span><span>{st.last_candle_age_min} min ago</span></div>
               <div className="kv"><span>Model</span><span>{st.model_version}</span></div>
-              <div className="kv"><span>Next retrain</span><span>{st.next_retrain}</span></div>
+              <div className="kv"><span>Next retrain</span><span><Time iso={st.next_retrain} withDate /></span></div>
             </div>
             <div className="card">
               <h2 className="h">Risk limits</h2>
@@ -58,5 +62,6 @@ export default async function Page() {
       </div>
       <AutoRefresh seconds={30} />
     </main>
+    </PrefsProvider>
   );
 }
