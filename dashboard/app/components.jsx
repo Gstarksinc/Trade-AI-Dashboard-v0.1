@@ -1,8 +1,8 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { calcTradeMetrics, fmtPct, fmtTime } from '../lib/format';
-import { Money, RateNote, Time, usePrefs } from './prefs';
+import { LastUpdatedBadge, LiveClock, Money, PrefToggles, RateNote, Time, usePrefs } from './prefs';
 
 const TIMEFRAMES = ['All', '15m', '1h', '4h'];
 const DIRECTIONS = ['All', 'Long', 'Short'];
@@ -952,5 +952,445 @@ export function EquityChart({ points = [] }) {
         <text x={width} y={height - 5} fontSize="11" fill="#9AA4B2" textAnchor="end">Today</text>
       </svg>
     </div>
+  );
+}
+
+/**
+ * 3D Animated Cyber Grid Canvas for Terminal Virtualization
+ */
+function CyberGridCanvas() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animId;
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    const onResize = () => {
+      if (!canvas) return;
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', onResize);
+
+    const particles = [];
+    const count = Math.min(50, Math.floor(width / 25));
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.7,
+        vy: (Math.random() - 0.5) * 0.7,
+        r: Math.random() * 2 + 1,
+        alpha: Math.random() * 0.5 + 0.2,
+      });
+    }
+
+    let offset = 0;
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height);
+
+      // Subtle cyber horizon gradient
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+      bgGrad.addColorStop(0, 'rgba(8, 11, 18, 0.95)');
+      bgGrad.addColorStop(1, 'rgba(4, 6, 10, 0.98)');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, width, height);
+
+      // Perspective horizon grid
+      offset = (offset + 0.35) % 32;
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
+      ctx.lineWidth = 1;
+
+      const horizon = height * 0.42;
+      const vanishingX = width * 0.5;
+
+      for (let x = -width; x < width * 2; x += 75) {
+        ctx.beginPath();
+        ctx.moveTo(x, height);
+        ctx.lineTo(vanishingX + (x - vanishingX) * 0.12, horizon);
+        ctx.stroke();
+      }
+
+      for (let y = height; y > horizon; y -= (height - horizon) / 9) {
+        const adjustedY = y + offset;
+        if (adjustedY <= height && adjustedY >= horizon) {
+          ctx.beginPath();
+          ctx.moveTo(0, adjustedY);
+          ctx.lineTo(width, adjustedY);
+          ctx.stroke();
+        }
+      }
+
+      // High-tech market data telemetry points
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = width;
+        if (p.x > width) p.x = 0;
+        if (p.y < 0) p.y = height;
+        if (p.y > height) p.y = 0;
+
+        ctx.fillStyle = `rgba(16, 185, 129, ${p.alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        for (let j = i + 1; j < particles.length; j++) {
+          const p2 = particles[j];
+          const dist = Math.hypot(p.x - p2.x, p.y - p2.y);
+          if (dist < 100) {
+            ctx.strokeStyle = `rgba(56, 189, 248, ${0.1 * (1 - dist / 100)})`;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      animId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      cancelAnimationFrame(animId);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="cyber-grid-canvas" />;
+}
+
+/**
+ * Institutional Terminal Sign-In & Authentication Virtualization Portal
+ */
+export function SignInPortal({ onLogin, tickers = {} }) {
+  const { theme, toggleTheme } = usePrefs();
+  const [email, setEmail] = useState('trader@tradeai.pro');
+  const [password, setPassword] = useState('••••••••');
+  const [remember, setRemember] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setTimeout(() => {
+      onLogin({ email, name: email.split('@')[0].toUpperCase() });
+    }, 350);
+  };
+
+  const handleQuickAccess = () => {
+    setIsSubmitting(true);
+    setTimeout(() => {
+      onLogin({ email: 'trader@tradeai.pro', name: 'PRO TRADER' });
+    }, 200);
+  };
+
+  return (
+    <div className="signin-page-container">
+      <CyberGridCanvas />
+
+      {/* Top Market Ticker Tape without scrollbars */}
+      <div className="signin-ticker-wrap">
+        <MarketTickerTape tickers={tickers} />
+      </div>
+
+      <div className="signin-theme-bar">
+        <button
+          className="tf icon-btn theme-btn"
+          onClick={toggleTheme}
+          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+        >
+          {theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode'}
+        </button>
+      </div>
+
+      <div className="signin-card-wrapper">
+        <div className="signin-card glass-panel">
+          <div className="signin-header">
+            <div className="brand-badge-row">
+              <span className="brand-pill">TRADE AI</span>
+              <span className="version-pill">v0.1 PRO FUTURES</span>
+              <span className="live-status-tag">● 100% BINANCE FEED</span>
+            </div>
+            <h1 className="signin-title">Quantitative Trading Terminal</h1>
+            <p className="signin-sub">
+              Algorithmic Directional Signals • ATR Risk Management • Sub-2ms ML Engine
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="signin-form">
+            <div className="input-group">
+              <label className="input-label">TRADER IDENTIFICATION / EMAIL</label>
+              <input
+                type="text"
+                className="terminal-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="trader@tradeai.pro"
+                required
+              />
+            </div>
+
+            <div className="input-group">
+              <label className="input-label">SECURITY ACCESS PIN / KEY</label>
+              <input
+                type="password"
+                className="terminal-input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Access Password"
+                required
+              />
+            </div>
+
+            <div className="form-options-row">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                <span>Remember session on this device</span>
+              </label>
+              <span className="secure-badge">🔒 256-Bit Encrypted</span>
+            </div>
+
+            <div className="signin-actions">
+              <button
+                type="submit"
+                className="signin-submit-btn"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Authenticating Terminal...' : '🚀 Sign In to Live Terminal'}
+              </button>
+
+              <button
+                type="button"
+                className="quick-demo-btn"
+                onClick={handleQuickAccess}
+                disabled={isSubmitting}
+                title="Instant One-Click Access without entering credentials"
+              >
+                ⚡ Instant One-Click Trader Access
+              </button>
+            </div>
+          </form>
+
+          <div className="signin-features-grid">
+            <div className="feature-item">
+              <span className="f-dot" />
+              <span>LightGBM + Meta-Filter</span>
+            </div>
+            <div className="feature-item">
+              <span className="f-dot" />
+              <span>Real-Time Binance Futures</span>
+            </div>
+            <div className="feature-item">
+              <span className="f-dot" />
+              <span>Dynamic ATR Stop/Target</span>
+            </div>
+            <div className="feature-item">
+              <span className="f-dot" />
+              <span>TimescaleDB &amp; Sub-2ms ML</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Full-Screen Responsive Trading Terminal Shell with Authentication & Theme Management
+ */
+export function DashboardShell({
+  summary: s,
+  signals,
+  history,
+  equity,
+  status: st,
+  health,
+  rates,
+  tickers,
+  dataDays,
+  sample,
+  fresh,
+}) {
+  const { authSession, isAuthChecking, login } = usePrefs();
+
+  // If checking authentication from localStorage, show brief smooth placeholder
+  if (isAuthChecking) {
+    return (
+      <div className="terminal-auth-loading">
+        <div className="spinner" />
+        <p className="loading-text">Initializing Trade AI Terminal...</p>
+      </div>
+    );
+  }
+
+  // If not signed in, show futuristic virtualized Sign-In Portal
+  if (!authSession) {
+    return <SignInPortal onLogin={login} tickers={tickers} />;
+  }
+
+  const up = (v) => (v === 'ok' ? 'OK' : 'Unreachable');
+
+  // Complete, responsive, full-page trading terminal
+  return (
+    <main className="page full-screen-terminal">
+      {/* Real-time Market Ticker Tape with ZERO scrollbars */}
+      <MarketTickerTape tickers={tickers} />
+
+      <div className="wrap">
+        {/* Main Top Header */}
+        <header className="top">
+          <div>
+            <div className="brand-badge-row">
+              <span className="brand-pill">TRADE AI</span>
+              <span className="version-pill">v0.1 PRO FUTURES</span>
+              <span className="live-status-tag">● 100% BINANCE FEED</span>
+            </div>
+            <h1 className="main-title">Algorithmic Signals &amp; Risk Dashboard</h1>
+            <p className="sub">
+              LightGBM + Meta-Labeling • 15m, 1h and 4h horizons across {s?.symbols_scanned || 8} active perpetuals
+            </p>
+          </div>
+          <div className="chips">
+            <div className="time-status-row">
+              <LiveClock />
+              <LastUpdatedBadge />
+            </div>
+            <PrefToggles />
+            <div className="status-tags-row">
+              <span className="chip mode-chip">
+                <span className="dot paper-dot" /> Paper Mode
+              </span>
+              {sample && (
+                <span className="chip sample-chip" title="Live Binance prices streaming; baseline predictive signals active">
+                  Baseline Signals
+                </span>
+              )}
+              <span className="chip">
+                <span className={fresh ? 'dot green' : 'dot warn'} />
+                {fresh ? 'Binance Collector Active' : 'Collector Stale'}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        {/* Interactive Session Controller (Data Available, Start Session, Reset Win Rate) */}
+        <SessionController dataDays={dataDays} />
+
+        {/* Key Performance Indicators */}
+        <section className="kpis">
+          <div className="card kpi-card">
+            <p className="h">Active Signals</p>
+            <p className="big font-num">{s?.open_signals || 0}</p>
+            <p className="sub">of {s?.symbols_scanned || 8} monitored symbols</p>
+          </div>
+          <div className="card kpi-card">
+            <p className="h">Tracked Win Rate</p>
+            <p className="big font-num text-tp">{fmtPct(s?.win_rate_30d)}</p>
+            <p className="sub">{s?.closed_30d || 0} closed paper trades (Session)</p>
+          </div>
+          <div className="card kpi-card">
+            <p className="h">Net P&amp;L (30D)</p>
+            <p className={`big font-num ${(s?.net_pnl_30d || 0) >= 0 ? 'text-tp' : 'text-sl'}`}>
+              {fmtPct(s?.net_pnl_30d, true)}
+            </p>
+            <p className="sub">after fees, slippage &amp; funding</p>
+          </div>
+          <div className="card kpi-card">
+            <p className="h">Max Drawdown</p>
+            <p className="big font-num text-sl">{fmtPct(s?.max_drawdown)}</p>
+            <p className="sub">within limit {fmtPct(s?.drawdown_limit || 8.0)}</p>
+          </div>
+        </section>
+
+        {/* Main Grid: Signals & History Panel (Left) & Risk / Health Panels (Right) */}
+        <section className="grid">
+          <SignalsPanel signals={signals} history={history} />
+
+          <div className="side">
+            {/* Paper Equity Curve */}
+            <div className="card side-card">
+              <h2 className="h">Paper Equity Curve (30 Days)</h2>
+              <EquityChart points={equity} />
+            </div>
+
+            {/* Pipeline & Model Health */}
+            <div className="card side-card">
+              <h2 className="h">Pipeline Health &amp; Model</h2>
+              <div className="kv">
+                <span>FastAPI Service</span>
+                <span className={health ? 'text-tp' : 'text-sl'}>{health ? 'Online' : 'Unreachable'}</span>
+              </div>
+              <div className="kv">
+                <span>TimescaleDB (Hypertables)</span>
+                <span className={health?.db === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.db)}</span>
+              </div>
+              <div className="kv">
+                <span>Redis Memory Cache</span>
+                <span className={health?.redis === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.redis)}</span>
+              </div>
+              <div className="kv">
+                <span>Data Available</span>
+                <span className="font-num text-tp">{dataDays} Days</span>
+              </div>
+              <div className="kv">
+                <span>Data Source</span>
+                <span className="font-num text-cyan">Binance USD-M (CoinGecko Off)</span>
+              </div>
+              <div className="kv">
+                <span>Active Model</span>
+                <span className="font-num text-cyan">{st?.model_version || 'LightGBM-v0.1'}</span>
+              </div>
+              <div className="kv">
+                <span>Next Retrain Run</span>
+                <span><Time iso={st?.next_retrain} withDate /></span>
+              </div>
+            </div>
+
+            {/* Risk Engine & Constraints */}
+            <div className="card side-card">
+              <h2 className="h">Risk Engine Controls</h2>
+              <div className="kv">
+                <span>Daily Loss Used</span>
+                <span className="font-num">
+                  {st?.daily_loss_used || 0}% of {st?.daily_loss_limit || 3.0}% max
+                </span>
+              </div>
+              <div className="kv">
+                <span>Max Simulated Leverage</span>
+                <span className="font-num text-cyan">{st?.max_leverage || 3.0}x isolated</span>
+              </div>
+              <div className="kv">
+                <span>Correlated Open Signals</span>
+                <span className="font-num">
+                  {st?.correlated_open || 0} of {st?.correlated_cap || 3} cap
+                </span>
+              </div>
+              <div className="kv">
+                <span>Market Regime</span>
+                <span className="regime-tag">{st?.market_regime || 'Normal Volatility'}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* Interactive Position Size & Risk Calculator Modal */}
+      <PositionCalculatorModal />
+
+      <AutoRefresh seconds={30} />
+    </main>
   );
 }

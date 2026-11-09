@@ -16,6 +16,13 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const [calcSignal, setCalcSignal] = useState(null);
   const [isCalcOpen, setIsCalcOpen] = useState(false);
 
+  // Light / Dark Theme State
+  const [theme, setTheme] = useState('dark');
+
+  // Terminal Authentication State
+  const [authSession, setAuthSession] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
   // Paper Trading Session State (Win Rate Controller)
   const [isSessionRunning, setIsSessionRunning] = useState(true);
   const [sessionStartTime, setSessionStartTime] = useState(null);
@@ -48,7 +55,7 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const wsRef = useRef(null);
 
-  // Restore saved preferences and session state
+  // Restore saved preferences, theme, and authentication session
   useEffect(() => {
     try {
       const p = JSON.parse(localStorage.getItem(KEY) || '{}');
@@ -57,13 +64,55 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
       if (p.viewMode) setViewMode(p.viewMode);
       if (typeof p.soundEnabled === 'boolean') setSoundEnabled(p.soundEnabled);
 
+      const savedTheme = localStorage.getItem('tradeai_theme') || 'dark';
+      setTheme(savedTheme);
+      document.documentElement.setAttribute('data-theme', savedTheme);
+
+      const savedAuth = JSON.parse(localStorage.getItem('tradeai_auth') || 'null');
+      if (savedAuth && (savedAuth.email || savedAuth.name)) {
+        setAuthSession(savedAuth);
+      }
+
       const sess = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
       if (sess.sessionStartTime) setSessionStartTime(sess.sessionStartTime);
       if (typeof sess.isSessionRunning === 'boolean') setIsSessionRunning(sess.isSessionRunning);
       if (sess.sessionStats) setSessionStats(sess.sessionStats);
       else setSessionStartTime(new Date().toISOString());
     } catch {}
+    setIsAuthChecking(false);
   }, [rates?.inr]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem('tradeai_theme', next);
+        document.documentElement.setAttribute('data-theme', next);
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const login = useCallback((creds = {}) => {
+    const session = {
+      email: creds.email || 'trader@tradeai.pro',
+      name: creds.name || 'Pro Trader',
+      role: 'Institutional Quant',
+      sessionId: 'SESSION-' + Math.floor(1000 + Math.random() * 9000),
+      loginTime: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem('tradeai_auth', JSON.stringify(session));
+    } catch {}
+    setAuthSession(session);
+  }, []);
+
+  const logout = useCallback(() => {
+    try {
+      localStorage.removeItem('tradeai_auth');
+    } catch {}
+    setAuthSession(null);
+  }, []);
 
   const save = useCallback((next) => {
     try {
@@ -332,6 +381,14 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     currentTime,
     lastUpdateTs,
     secondsAgo,
+    // Light & Dark Theme
+    theme,
+    toggleTheme,
+    // Authentication
+    authSession,
+    isAuthChecking,
+    login,
+    logout,
     // Session & Win Rate controller
     isSessionRunning,
     sessionStartTime,
@@ -432,7 +489,22 @@ function Seg({ label, options, value, onChange, disabled = {} }) {
 }
 
 export function PrefToggles() {
-  const { cur, tz, setCur, setTz, rates, viewMode, setViewMode, soundEnabled, setSoundEnabled } = usePrefs();
+  const {
+    cur,
+    tz,
+    setCur,
+    setTz,
+    rates,
+    viewMode,
+    setViewMode,
+    soundEnabled,
+    setSoundEnabled,
+    theme,
+    toggleTheme,
+    authSession,
+    logout,
+  } = usePrefs();
+
   return (
     <div className="pref-bar">
       <div className="pref-group">
@@ -442,6 +514,14 @@ export function PrefToggles() {
       </div>
       <div className="pref-group">
         <button
+          className="tf icon-btn theme-btn"
+          onClick={toggleTheme}
+          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          aria-label="Toggle Theme"
+        >
+          {theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode'}
+        </button>
+        <button
           className={`tf icon-btn ${soundEnabled ? 'active' : ''}`}
           onClick={() => setSoundEnabled(!soundEnabled)}
           title={soundEnabled ? 'Mute audio alerts' : 'Enable audio alerts'}
@@ -449,6 +529,15 @@ export function PrefToggles() {
         >
           {soundEnabled ? '🔊 Audio ON' : '🔈 Audio OFF'}
         </button>
+        {authSession && (
+          <div className="user-session-chip">
+            <span className="user-status-dot" />
+            <span className="user-name">{authSession.name || 'Trader'}</span>
+            <button className="tf logout-btn" onClick={logout} title="Sign out of Terminal">
+              🚪 Sign Out
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
