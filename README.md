@@ -1,82 +1,114 @@
 # Trade AI Dashboard v0.1
 
-A self-hosted crypto futures signal system and dashboard: Binance Futures market data, a LightGBM prediction model with meta-labeling, risk-managed entry/stop/target levels, a Next.js dashboard and Telegram alerts. **Paper trading only. It does not place orders.**
+A self-hosted, high-frequency cryptocurrency algorithmic signal platform and institutional-grade trading dashboard: Binance Futures live streaming market data, LightGBM prediction model with meta-labeling, adaptive ATR risk management, Next.js 14 multi-view dashboard, and paper trading execution.
 
-> Engineering project, not financial advice. Leveraged futures can lose money quickly. Validate with at least 2-3 months of forward paper trading before relying on any signal.
+> **Disclaimer**: This is an engineering research and paper-trading platform, not financial advice. All orders and portfolio balances are simulated with zero financial risk. It does not place real exchange orders.
 
-## Status
+---
 
-| Area | State |
+## Current Status & Verification Checklist
+
+| Milestone | Area | Status | Notes |
+|---|---|---|---|
+| **01** | Docker Compose Stack | **Completed** | PostgreSQL 16 (TimescaleDB), Redis 7, FastAPI, Next.js 14 |
+| **02** | Hypertables & TimescaleDB Schema | **Completed** | 6 hypertables (`candles`, `funding_rates`, `open_interest`, etc.) |
+| **03** | Data Ingestion Pipeline | **Completed** | Direct Binance MiniTicker WS (`!miniTicker@arr`) + REST polling |
+| **04** | Feature Pipeline & Triple-Barrier | **Completed** | TA-Lib momentum, derivatives metrics, volatility regimes |
+| **05** | ML Model & Meta-Labeling | **Completed** | Calibrated LightGBM (Stage 1) + Random Forest Meta-Gate (Stage 2) |
+| **06** | Adaptive Risk Engine | **Completed** | ATR stops ($1 : 2.2$ R:R), 3x max leverage, daily loss limits |
+| **07** | FastAPI Core Services | **Completed** | `/health`, `/summary`, `/signals`, `/history`, `/equity`, `/status` |
+| **08** | Signal Lifecycle Transitions | **Completed** | 5 states: *Waiting confirmation*, *Waiting entry*, *Order in progress*, *Win*, *Loss* |
+| **09** | Idempotent Persistence | **Completed** | `/signals/transition` persists status & records paper trades without duplication |
+| **10** | Performance & Trade History | **Completed** | Duration, time-to-target, prediction timestamps, win/loss analytics |
+| **11** | Next.js Multi-View Dashboard | **Completed** | 7 views: Overview, Markets, Signals, Positions, History, Chart, System |
+| **12** | SVG Candlestick Chart | **Completed** | 15m/1h/4h/1D controls, volume histogram, 20/50 EMAs, signal overlays |
+| **13** | Theme & Accessibility | **Completed** | High-contrast Dark & Light modes with WCAG AA compliance |
+| **14** | Automated Unit Test Suite | **Completed** | 21 focused tests passing in `dashboard/tests/signal_lifecycle.test.mjs` |
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed phase breakdowns and forward roadmap items.
+
+---
+
+## Technical Stack
+
+| Layer | Technology |
 |---|---|
-| Docker Compose stack (TimescaleDB, Redis, FastAPI) | Done |
-| Database schema (6 hypertables, signals, paper trades) | Done |
-| API `/health` | Done |
-| Next.js dashboard (USD/INR and UTC/IST switches; live health, sample data until API endpoints exist) | Done |
-| API endpoints `/summary`, `/signals`, `/equity`, `/status` | Planned |
-| Collector (Binance backfill and live polling, unit tested, verify against live data) | Done |
-| Features, labeling, models, backtest, risk engine | Planned (next: features and labels) |
-| Telegram notifier | Planned |
+| **Language & Backend API** | Python 3.11, FastAPI, Uvicorn, Pydantic |
+| **Market Data Feed** | Binance USD-M Futures Public REST & WebSocket API |
+| **Technical Indicators** | TA-Lib (C library wrapped via Python) |
+| **Machine Learning** | LightGBM (Platt-calibrated) + Meta-Labeling Classifier |
+| **Database & Caching** | PostgreSQL 16 with TimescaleDB extension, Redis 7 |
+| **Frontend Framework** | Next.js 14 (React 18, Server Components & Dynamic SSR) |
+| **Containerization** | Docker Compose with multi-stage production builds |
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the build order.
+---
 
-## Stack
+## Architecture Diagram
 
-| Layer | Choice |
-|---|---|
-| Language / API | Python 3.11, FastAPI |
-| Market data | Binance Futures public API, data.binance.vision bulk files |
-| Universe ranking | CoinGecko Demo API (daily) |
-| Indicators | TA-Lib |
-| Model | LightGBM (calibrated) plus a meta-labeling classifier |
-| Sentiment | FinBERT or CryptoBERT (Phase 2, only if it helps out-of-sample) |
-| Database / cache | PostgreSQL 16 with TimescaleDB, Redis 7 |
-| Dashboard | Next.js 14 |
-| Alerts | Telegram Bot API |
-| Deployment | Docker Compose on Debian 12/13 |
+```
+Binance Futures REST / WS ──► collector ──► TimescaleDB ──► features (TA-Lib + derivatives data)
+                                                                    │
+                                                            LightGBM + Meta-Filter
+                                                                    │
+                                                        risk engine (entry / SL / TP / sizing)
+                                                                    │
+                                            FastAPI ◄───────────────┴────► Redis (pub/sub)
+                                               │
+                                    ┌──────────┴──────────┐
+                                    ▼                     ▼
+                             Next.js Dashboard     /signals/transition
+                              (Port :3000)          (Idempotent DB writes)
+```
 
-## Quick start (Debian)
+Full architectural specifications, data flows, and state machine diagrams are detailed in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
+## Monitored Futures Universe
+
+The system actively tracks 8 liquid Binance USD-M perpetual contracts:
+`BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `XRPUSDT`, `DOGEUSDT`, `LINKUSDT`, `TRXUSDT`.
+
+All tracked coins adhere strictly to the 5-stage lifecycle:
+1. **Waiting for confirmation**: Monitoring market structure; no confirmed breakout setup.
+2. **Waiting for entry**: Breakout confirmed ($P \ge 0.55$ + Meta-Gate); limit entry pending.
+3. **Order in progress**: Market price touched entry; paper trade actively open with live floating P&L.
+4. **Win — Target hit**: Take-profit target reached; trade closed with positive return.
+5. **Loss — Stop loss hit**: Stop-loss touched; trade closed with controlled risk limit.
+
+Completed trades immediately transition into **Performance & Trade History** with trade duration, time-to-target, and exact entry/exit prices.
+
+---
+
+## Deployment & Server Commands
+
+### Quick Start (Debian 12/13 Host)
 
 ```bash
 git clone https://github.com/Gstarksinc/Trade-AI-Dashboard-v0.1.git /opt/signals
 cd /opt/signals
-bash scripts/gen_env.sh            # creates .env with random passwords
-docker compose up -d --build       # db, redis, api
-curl -s http://127.0.0.1:8000/health
-docker compose --profile full up -d --build dashboard
+bash scripts/gen_env.sh            # creates .env with secure random passwords
+docker compose up -d --build       # starts db, redis, api, collector, dashboard
 ```
 
-The dashboard listens on `127.0.0.1:3000`. Reach it with an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 user@SERVER_IP`, then open `http://localhost:3000`.
+### Apply Latest Repository Updates
 
-Full machine preparation (users, SSH, firewall, Docker, time sync, backups) is in [docs/SETUP_DEBIAN.md](docs/SETUP_DEBIAN.md).
-
-## Repository layout
-
-```
-docker-compose.yml        services and profiles
-.env.example              configuration template (copy via scripts/gen_env.sh)
-docker/python.Dockerfile  Python image with TA-Lib built from source
-db/init/001_schema.sql    TimescaleDB schema (runs on first start of an empty volume)
-api/                      FastAPI service
-dashboard/                Next.js dashboard
-collector/                Binance data collector (done)
-features/ labeling/ models/ backtest/ risk/ notifier/   planned modules
-tests/                    unit tests (`python -m unittest discover -s tests`)
-scripts/                  gen_env.sh, backup.sh
-docs/                     setup, architecture, dashboard API contract, roadmap
+```bash
+cd /opt/signals
+git pull origin main
+docker compose build --no-cache dashboard api
+docker compose up -d dashboard api
+docker logs --tail 30 -f signals-dashboard-1
 ```
 
-## Docker Compose profiles
+Access the dashboard at `http://SERVER_IP:3000` (or via SSH tunnel: `ssh -L 3000:127.0.0.1:3000 user@SERVER_IP`).
 
-| Command | Starts |
-|---|---|
-| `docker compose up -d` | db, redis, api |
-| `docker compose --profile full up -d` | adds collector, notifier, dashboard (once their code exists) |
-| `docker compose --profile train run --rm trainer` | one-off training run |
+---
 
-## Documentation
+## Documentation Index
 
-- [Debian setup guide](docs/SETUP_DEBIAN.md)
-- [Collector](docs/COLLECTOR.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Dashboard API contract](docs/DASHBOARD_API.md)
-- [Roadmap and pass/fail criteria](docs/ROADMAP.md)
+- [Comprehensive Architecture & Technical Specification](docs/ARCHITECTURE.md)
+- [Dashboard API Contract & Endpoints](docs/DASHBOARD_API.md)
+- [Project Roadmap & Checklist](docs/ROADMAP.md)
+- [Debian Server Host Setup Guide](docs/SETUP_DEBIAN.md)
+- [Data Collector Technical Guide](docs/COLLECTOR.md)

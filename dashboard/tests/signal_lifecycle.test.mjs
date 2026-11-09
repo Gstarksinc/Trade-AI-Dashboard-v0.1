@@ -282,3 +282,4 @@ describe('4. Timestamp Mapping & Duration Calculation', () => {
     assert.equal(fmtDuration(tradeRecord.opened_at, tradeRecord.closed_at), '5h 15m 0s');
   });
 });
+
