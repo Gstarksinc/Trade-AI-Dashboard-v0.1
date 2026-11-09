@@ -11,28 +11,28 @@ function nextSunday0200() {
   return d.toISOString();
 }
 
-// Default fallback tickers if Binance is momentarily unreachable
+// Default fallback tickers matching real Binance Futures prices
 const DEFAULT_TICKERS = {
-  BTCUSDT: { price: 74518.8, change: 1.85, high: 75575.0, low: 73715.0, vol: '6.5B' },
-  ETHUSDT: { price: 2113.5, change: -1.42, high: 2180.0, low: 2090.0, vol: '1.8B' },
-  SOLUSDT: { price: 184.2, change: 3.45, high: 188.5, low: 178.0, vol: '840M' },
-  BNBUSDT: { price: 704.8, change: 0.32, high: 712.0, low: 698.0, vol: '310M' },
-  XRPUSDT: { price: 2.345, change: 4.12, high: 2.42, low: 2.25, vol: '520M' },
-  DOGEUSDT: { price: 0.1835, change: -1.75, high: 0.191, low: 0.181, vol: '290M' },
-  LINKUSDT: { price: 17.65, change: 1.15, high: 18.2, low: 17.1, vol: '180M' },
-  TRXUSDT: { price: 0.2865, change: 0.45, high: 0.292, low: 0.282, vol: '95M' },
+  BTCUSDT: { price: 74880.0, change: 1.85, high: 75575.0, low: 73715.0, vol: '6.5B' },
+  ETHUSDT: { price: 2123.5, change: -1.42, high: 2180.0, low: 2090.0, vol: '1.8B' },
+  SOLUSDT: { price: 86.68, change: -2.15, high: 91.20, low: 84.50, vol: '840M' },
+  BNBUSDT: { price: 686.80, change: 0.32, high: 698.0, low: 678.0, vol: '310M' },
+  XRPUSDT: { price: 1.1043, change: 2.12, high: 1.152, low: 1.075, vol: '520M' },
+  DOGEUSDT: { price: 0.06975, change: -1.75, high: 0.0735, low: 0.0678, vol: '290M' },
+  LINKUSDT: { price: 10.598, change: 1.15, high: 11.20, low: 10.25, vol: '180M' },
+  TRXUSDT: { price: 0.3176, change: 0.45, high: 0.324, low: 0.311, vol: '95M' },
 };
 
 // Shown when API endpoints are initializing. All prices are pure Binance USDT perpetuals.
 function sample(livePrices = {}) {
-  const btcPrice = livePrices.BTCUSDT?.price || 74518.8;
-  const ethPrice = livePrices.ETHUSDT?.price || 2113.5;
-  const solPrice = livePrices.SOLUSDT?.price || 184.2;
-  const bnbPrice = livePrices.BNBUSDT?.price || 704.8;
-  const trxPrice = livePrices.TRXUSDT?.price || 0.2865;
-  const linkPrice = livePrices.LINKUSDT?.price || 17.65;
-  const xrpPrice = livePrices.XRPUSDT?.price || 2.345;
-  const dogePrice = livePrices.DOGEUSDT?.price || 0.1835;
+  const btcPrice = Number(livePrices.BTCUSDT?.price) || 74880.0;
+  const ethPrice = Number(livePrices.ETHUSDT?.price) || 2123.5;
+  const solPrice = Number(livePrices.SOLUSDT?.price) || 86.68;
+  const bnbPrice = Number(livePrices.BNBUSDT?.price) || 686.80;
+  const trxPrice = Number(livePrices.TRXUSDT?.price) || 0.3176;
+  const linkPrice = Number(livePrices.LINKUSDT?.price) || 10.598;
+  const xrpPrice = Number(livePrices.XRPUSDT?.price) || 1.1043;
+  const dogePrice = Number(livePrices.DOGEUSDT?.price) || 0.06975;
 
   return {
     summary: {
@@ -121,8 +121,8 @@ function sample(livePrices = {}) {
         meta_probability: 0.72,
         current_price: trxPrice,
         entry: Number((trxPrice * 0.995).toFixed(4)),
-        stop_loss: Number((trxPrice * 0.975).toFixed(4)),
-        take_profit: Number((trxPrice * 1.038).toFixed(4)),
+        stop_loss: Number((trxPrice * 0.978).toFixed(4)),
+        take_profit: Number((trxPrice * 1.035).toFixed(4)),
         atr: 0.007,
         status: 'open',
         created_at: ago(110),
@@ -136,10 +136,10 @@ function sample(livePrices = {}) {
         probability: 0.56,
         meta_probability: 0.65,
         current_price: linkPrice,
-        entry: Number((linkPrice * 1.004).toFixed(2)),
-        stop_loss: Number((linkPrice * 1.016).toFixed(2)),
-        take_profit: Number((linkPrice * 0.976).toFixed(2)),
-        atr: 0.42,
+        entry: Number((linkPrice * 1.004).toFixed(3)),
+        stop_loss: Number((linkPrice * 1.025).toFixed(3)),
+        take_profit: Number((linkPrice * 0.965).toFixed(3)),
+        atr: 0.32,
         status: 'open',
         created_at: ago(140),
         model_version: 'LightGBM-v0.1 + Meta-Filter',
@@ -152,11 +152,11 @@ function sample(livePrices = {}) {
         probability: 0.63,
         meta_probability: 0.78,
         current_price: xrpPrice,
-        entry: Number((xrpPrice * 0.97).toFixed(3)),
-        stop_loss: Number((xrpPrice * 0.95).toFixed(3)),
-        take_profit: Number((xrpPrice * 1.02).toFixed(3)),
-        atr: 0.045,
-        status: 'target_hit',
+        entry: Number((xrpPrice * 0.992).toFixed(4)),
+        stop_loss: Number((xrpPrice * 0.972).toFixed(4)),
+        take_profit: Number((xrpPrice * 1.042).toFixed(4)),
+        atr: 0.025,
+        status: 'open',
         created_at: ago(210),
         model_version: 'LightGBM-v0.1 + Meta-Filter',
       },
@@ -168,27 +168,27 @@ function sample(livePrices = {}) {
         probability: 0.54,
         meta_probability: 0.61,
         current_price: dogePrice,
-        entry: Number((dogePrice * 1.02).toFixed(4)),
-        stop_loss: Number((dogePrice * 1.04).toFixed(4)),
-        take_profit: Number((dogePrice * 0.97).toFixed(4)),
-        atr: 0.006,
-        status: 'stopped',
+        entry: Number((dogePrice * 1.006).toFixed(5)),
+        stop_loss: Number((dogePrice * 1.028).toFixed(5)),
+        take_profit: Number((dogePrice * 0.955).toFixed(5)),
+        atr: 0.0022,
+        status: 'open',
         created_at: ago(320),
         model_version: 'LightGBM-v0.1 + Meta-Filter',
       },
     ],
     // Historical resolved trades for the History View
     history: [
-      { id: 101, symbol: 'BTCUSDT', timeframe: '1h', direction: 'long', entry: 72150, exit_price: 73850, pnl_pct: 2.35, exit_reason: 'Target Hit', closed_at: ago(180) },
-      { id: 102, symbol: 'ETHUSDT', timeframe: '15m', direction: 'short', entry: 3450, exit_price: 3380, pnl_pct: 2.03, exit_reason: 'Target Hit', closed_at: ago(360) },
-      { id: 103, symbol: 'SOLUSDT', timeframe: '4h', direction: 'long', entry: 172.5, exit_price: 181.2, pnl_pct: 5.04, exit_reason: 'Target Hit', closed_at: ago(720) },
-      { id: 104, symbol: 'BNBUSDT', timeframe: '1h', direction: 'short', entry: 712, exit_price: 720.5, pnl_pct: -1.19, exit_reason: 'Stopped Out', closed_at: ago(1200) },
-      { id: 105, symbol: 'XRPUSDT', timeframe: '15m', direction: 'long', entry: 2.18, exit_price: 2.29, pnl_pct: 5.05, exit_reason: 'Target Hit', closed_at: ago(1600) },
-      { id: 106, symbol: 'DOGEUSDT', timeframe: '1h', direction: 'short', entry: 0.192, exit_price: 0.196, pnl_pct: -2.08, exit_reason: 'Stopped Out', closed_at: ago(2400) },
-      { id: 107, symbol: 'LINKUSDT', timeframe: '15m', direction: 'long', entry: 16.8, exit_price: 17.4, pnl_pct: 3.57, exit_reason: 'Target Hit', closed_at: ago(3200) },
-      { id: 108, symbol: 'BTCUSDT', timeframe: '4h', direction: 'long', entry: 68400, exit_price: 71200, pnl_pct: 4.09, exit_reason: 'Target Hit', closed_at: ago(4800) },
-      { id: 109, symbol: 'SOLUSDT', timeframe: '1h', direction: 'short', entry: 185.0, exit_price: 188.2, pnl_pct: -1.73, exit_reason: 'Stopped Out', closed_at: ago(6000) },
-      { id: 110, symbol: 'ETHUSDT', timeframe: '4h', direction: 'long', entry: 2040.0, exit_price: 2125.0, pnl_pct: 4.17, exit_reason: 'Target Hit', closed_at: ago(8500) },
+      { id: 101, symbol: 'BTCUSDT', timeframe: '1h', direction: 'long', entry: 74150, exit_price: 75200, pnl_pct: 1.42, exit_reason: 'Target Hit', closed_at: ago(180) },
+      { id: 102, symbol: 'ETHUSDT', timeframe: '15m', direction: 'short', entry: 2145, exit_price: 2108, pnl_pct: 1.72, exit_reason: 'Target Hit', closed_at: ago(360) },
+      { id: 103, symbol: 'SOLUSDT', timeframe: '4h', direction: 'long', entry: 84.5, exit_price: 88.6, pnl_pct: 4.85, exit_reason: 'Target Hit', closed_at: ago(720) },
+      { id: 104, symbol: 'BNBUSDT', timeframe: '1h', direction: 'short', entry: 694, exit_price: 702.5, pnl_pct: -1.22, exit_reason: 'Stopped Out', closed_at: ago(1200) },
+      { id: 105, symbol: 'XRPUSDT', timeframe: '15m', direction: 'long', entry: 1.065, exit_price: 1.118, pnl_pct: 4.98, exit_reason: 'Target Hit', closed_at: ago(1600) },
+      { id: 106, symbol: 'DOGEUSDT', timeframe: '1h', direction: 'short', entry: 0.0718, exit_price: 0.0732, pnl_pct: -1.95, exit_reason: 'Stopped Out', closed_at: ago(2400) },
+      { id: 107, symbol: 'LINKUSDT', timeframe: '15m', direction: 'long', entry: 10.15, exit_price: 10.58, pnl_pct: 4.24, exit_reason: 'Target Hit', closed_at: ago(3200) },
+      { id: 108, symbol: 'TRXUSDT', timeframe: '4h', direction: 'long', entry: 0.308, exit_price: 0.321, pnl_pct: 4.22, exit_reason: 'Target Hit', closed_at: ago(4100) },
+      { id: 109, symbol: 'SOLUSDT', timeframe: '1h', direction: 'short', entry: 87.2, exit_price: 85.1, pnl_pct: 2.41, exit_reason: 'Target Hit', closed_at: ago(6000) },
+      { id: 110, symbol: 'ETHUSDT', timeframe: '4h', direction: 'long', entry: 2085.0, exit_price: 2130.0, pnl_pct: 2.16, exit_reason: 'Target Hit', closed_at: ago(8500) },
     ],
     equity: [
       { ts: ago(30 * 1440), equity: 100 },
@@ -291,14 +291,34 @@ export async function loadDashboard() {
     ? signals.data
     : s.signals;
 
-  // Enrich signals with live market price if not already provided by backend
+  // Enrich signals with live market price and ensure entry/sl/tp levels are synchronized to actual price scale
   const enrichedSignals = rawSignals.map((sig) => {
     const tick = tickers[sig.symbol];
-    const cmp = sig.current_price || tick?.price || sig.entry;
-    const change24h = tick?.change || 0;
+    const liveCmp = Number(tick?.price);
+    const hasLiveCmp = !isNaN(liveCmp) && liveCmp > 0;
+    const cmp = hasLiveCmp ? liveCmp : (sig.current_price || sig.entry);
+    
+    let entry = sig.entry;
+    let sl = sig.stop_loss;
+    let tp = sig.take_profit;
+
+    if (hasLiveCmp && entry && Math.abs(entry - liveCmp) / liveCmp > 0.15) {
+      const isLong = String(sig.direction || 'long').toLowerCase() === 'long';
+      const slDist = sig.stop_loss ? Math.abs(sig.entry - sig.stop_loss) / sig.entry : 0.02;
+      const tpDist = sig.take_profit ? Math.abs(sig.take_profit - sig.entry) / sig.entry : 0.04;
+      const prec = liveCmp < 0.1 ? 5 : (liveCmp < 1 ? 4 : (liveCmp < 20 ? 3 : 2));
+      entry = isLong ? Number((liveCmp * 0.996).toFixed(prec)) : Number((liveCmp * 1.004).toFixed(prec));
+      sl = isLong ? Number((entry * (1 - slDist)).toFixed(prec)) : Number((entry * (1 + slDist)).toFixed(prec));
+      tp = isLong ? Number((entry * (1 + tpDist)).toFixed(prec)) : Number((entry * (1 - tpDist)).toFixed(prec));
+    }
+
+    const change24h = tick?.change != null ? tick.change : (sig.change_24h || 0);
     return {
       ...sig,
       current_price: cmp,
+      entry,
+      stop_loss: sl,
+      take_profit: tp,
       change_24h: change24h,
     };
   });

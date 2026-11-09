@@ -13,7 +13,7 @@ export function fmtMoney(value, cur = 'USD', rates = { usd: 1, inr: 86.85 }) {
   const rate = cur === 'INR' ? (rates?.inr || 86.85) : (rates?.usd || 1);
   const v = Number(value) * rate;
   const a = Math.abs(v);
-  const digits = a >= 1000 ? (a >= 10000 ? 1 : 2) : a >= 10 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 4 : 6;
+  const digits = a >= 1000 ? (a >= 10000 ? 1 : 2) : a >= 20 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 4 : 5;
   const { locale, code } = CURRENCY[cur] || CURRENCY.USD;
   try {
     return new Intl.NumberFormat(locale, {

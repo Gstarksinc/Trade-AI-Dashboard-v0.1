@@ -236,9 +236,14 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
                   else tickDir = old.tickDir;
                 }
 
+                const openPrice = Number(item.o);
+                const changePct = openPrice > 0
+                  ? Number((((newPrice - openPrice) / openPrice) * 100).toFixed(2))
+                  : (old ? old.change : 0);
+
                 next[sym] = {
                   price: newPrice,
-                  change: old ? old.change : 0,
+                  change: changePct,
                   high: Number(item.h) || (old ? old.high : newPrice),
                   low: Number(item.l) || (old ? old.low : newPrice),
                   tickDir,

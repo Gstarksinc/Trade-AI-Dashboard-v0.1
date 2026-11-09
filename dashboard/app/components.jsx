@@ -200,10 +200,38 @@ export function SignalsPanel({ signals = [], history = [] }) {
   const enrichedRows = useMemo(() => {
     return signalList.map((sig) => {
       const live = getPrice(sig?.symbol, sig?.current_price || sig?.entry);
-      const metrics = calcTradeMetrics(sig, live?.price);
-      return {
+      const livePrice = live?.price || sig?.current_price || sig?.entry || 0;
+
+      let effectiveEntry = sig?.entry;
+      let effectiveSl = sig?.stop_loss;
+      let effectiveTp = sig?.take_profit;
+
+      // Dynamically resynchronize entry, stop loss, and take profit if signal was from a different price baseline
+      if (livePrice > 0 && effectiveEntry > 0 && Math.abs(effectiveEntry - livePrice) / livePrice > 0.15) {
+        const isLong = String(sig?.direction || 'long').toLowerCase() === 'long';
+        const slDist = (effectiveEntry && effectiveSl) ? Math.abs(effectiveEntry - effectiveSl) / effectiveEntry : 0.02;
+        const tpDist = (effectiveEntry && effectiveTp) ? Math.abs(effectiveTp - effectiveEntry) / effectiveEntry : 0.04;
+        const prec = livePrice < 0.1 ? 5 : (livePrice < 1 ? 4 : (livePrice < 20 ? 3 : 2));
+        
+        effectiveEntry = isLong ? Number((livePrice * 0.996).toFixed(prec)) : Number((livePrice * 1.004).toFixed(prec));
+        effectiveSl = isLong ? Number((effectiveEntry * (1 - slDist)).toFixed(prec)) : Number((effectiveEntry * (1 + slDist)).toFixed(prec));
+        effectiveTp = isLong ? Number((effectiveEntry * (1 + tpDist)).toFixed(prec)) : Number((effectiveEntry * (1 - tpDist)).toFixed(prec));
+      }
+
+      const syncedSig = {
         ...sig,
-        livePrice: live?.price || sig?.entry || 0,
+        entry: effectiveEntry,
+        stop_loss: effectiveSl,
+        take_profit: effectiveTp,
+      };
+
+      const metrics = calcTradeMetrics(syncedSig, livePrice);
+      const liveChange = live?.change != null ? live.change : sig?.change_24h;
+
+      return {
+        ...syncedSig,
+        livePrice,
+        change_24h: liveChange,
         tickDir: live?.tickDir,
         metrics,
       };

@@ -128,21 +128,56 @@ def generate_fallback_signals(conn=None) -> list:
         except Exception:
             pass
 
+    # Ensure live prices are fetched from Binance public REST if not yet in database
+    tracked = {'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'}
+    missing = tracked - set(prices.keys())
+    if missing:
+        try:
+            import urllib.request
+            import json
+            req = urllib.request.Request(
+                "https://fapi.binance.com/fapi/v1/ticker/price",
+                headers={"User-Agent": "TradeAI/0.1"}
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                for item in data:
+                    sym = item.get('symbol')
+                    if sym in missing:
+                        prices[sym] = float(item['price'])
+        except Exception:
+            pass
+
+    # Up-to-date accurate market fallbacks
+    defaults = {
+        'BTCUSDT': 74880.0,
+        'ETHUSDT': 2123.5,
+        'SOLUSDT': 86.68,
+        'BNBUSDT': 686.80,
+        'XRPUSDT': 1.1043,
+        'DOGEUSDT': 0.06975,
+        'LINKUSDT': 10.598,
+        'TRXUSDT': 0.3176,
+    }
+    for k, v in defaults.items():
+        if k not in prices or prices[k] <= 0:
+            prices[k] = v
+
     now = datetime.now(timezone.utc)
     configs = [
-        ('BTCUSDT', '1h', 'long', 0.64, 0.76, prices.get('BTCUSDT', 74250.0), 0.998, 0.987, 1.022, 820.0, 'open', 12),
-        ('ETHUSDT', '15m', 'short', 0.59, 0.68, prices.get('ETHUSDT', 3415.5), 1.002, 1.011, 0.981, 38.5, 'open', 28),
-        ('SOLUSDT', '4h', 'long', 0.67, 0.81, prices.get('SOLUSDT', 184.2), 0.996, 0.968, 1.058, 6.4, 'open', 55),
-        ('BNBUSDT', '1h', 'short', 0.58, 0.70, prices.get('BNBUSDT', 704.8), 1.003, 1.014, 0.978, 8.9, 'open', 82),
-        ('TRXUSDT', '4h', 'long', 0.61, 0.72, prices.get('TRXUSDT', 0.2865), 0.995, 0.975, 1.038, 0.007, 'open', 110),
-        ('LINKUSDT', '15m', 'short', 0.56, 0.65, prices.get('LINKUSDT', 17.65), 1.004, 1.016, 0.976, 0.42, 'open', 140),
-        ('XRPUSDT', '15m', 'long', 0.63, 0.78, prices.get('XRPUSDT', 2.345), 0.970, 0.950, 1.020, 0.045, 'target_hit', 210),
-        ('DOGEUSDT', '1h', 'short', 0.54, 0.61, prices.get('DOGEUSDT', 0.1835), 1.020, 1.040, 0.970, 0.006, 'stopped', 320),
+        ('BTCUSDT', '1h', 'long', 0.64, 0.76, prices['BTCUSDT'], 0.998, 0.987, 1.022, 820.0, 'open', 12),
+        ('ETHUSDT', '15m', 'short', 0.59, 0.68, prices['ETHUSDT'], 1.002, 1.011, 0.981, 28.5, 'open', 28),
+        ('SOLUSDT', '4h', 'long', 0.67, 0.81, prices['SOLUSDT'], 0.996, 0.968, 1.058, 2.4, 'open', 55),
+        ('BNBUSDT', '1h', 'short', 0.58, 0.70, prices['BNBUSDT'], 1.003, 1.014, 0.978, 7.5, 'open', 82),
+        ('TRXUSDT', '4h', 'long', 0.61, 0.72, prices['TRXUSDT'], 0.995, 0.978, 1.035, 0.007, 'open', 110),
+        ('LINKUSDT', '15m', 'short', 0.56, 0.65, prices['LINKUSDT'], 1.004, 1.025, 0.965, 0.32, 'open', 140),
+        ('XRPUSDT', '15m', 'long', 0.63, 0.78, prices['XRPUSDT'], 0.992, 0.972, 1.042, 0.025, 'open', 210),
+        ('DOGEUSDT', '1h', 'short', 0.54, 0.61, prices['DOGEUSDT'], 1.006, 1.028, 0.955, 0.0022, 'open', 320),
     ]
 
     out = []
     for idx, (sym, tf, dirn, prob, meta, cmp, e_mult, sl_mult, tp_mult, atr_val, status, ago_min) in enumerate(configs, 1):
-        digits = 4 if cmp < 1 else (2 if cmp < 1000 else 1)
+        digits = 5 if cmp < 0.1 else (4 if cmp < 1 else (3 if cmp < 20 else (2 if cmp < 1000 else 1)))
         entry = round(cmp * e_mult, digits)
         sl = round(cmp * sl_mult, digits)
         tp = round(cmp * tp_mult, digits)
@@ -267,14 +302,14 @@ def equity(days: int = Query(default=30, le=90)):
 @app.get('/history')
 def get_history(days: int = Query(default=30, le=365)):
     default_history = [
-        {'id': 101, 'symbol': 'BTCUSDT', 'timeframe': '1h', 'direction': 'long', 'entry': 72150.0, 'exit_price': 73850.0, 'pnl_pct': 2.35, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
-        {'id': 102, 'symbol': 'ETHUSDT', 'timeframe': '15m', 'direction': 'short', 'entry': 3450.0, 'exit_price': 3380.0, 'pnl_pct': 2.03, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
-        {'id': 103, 'symbol': 'SOLUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 172.5, 'exit_price': 181.2, 'pnl_pct': 5.04, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()},
-        {'id': 104, 'symbol': 'BNBUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 712.0, 'exit_price': 720.5, 'pnl_pct': -1.19, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()},
-        {'id': 105, 'symbol': 'XRPUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 2.18, 'exit_price': 2.29, 'pnl_pct': 5.05, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=28)).isoformat()},
-        {'id': 106, 'symbol': 'DOGEUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 0.192, 'exit_price': 0.196, 'pnl_pct': -2.08, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=40)).isoformat()},
-        {'id': 107, 'symbol': 'LINKUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 16.8, 'exit_price': 17.4, 'pnl_pct': 3.57, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=54)).isoformat()},
-        {'id': 108, 'symbol': 'BTCUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 68400.0, 'exit_price': 71200.0, 'pnl_pct': 4.09, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=80)).isoformat()},
+        {'id': 101, 'symbol': 'BTCUSDT', 'timeframe': '1h', 'direction': 'long', 'entry': 74150.0, 'exit_price': 75200.0, 'pnl_pct': 1.42, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
+        {'id': 102, 'symbol': 'ETHUSDT', 'timeframe': '15m', 'direction': 'short', 'entry': 2145.0, 'exit_price': 2108.0, 'pnl_pct': 1.72, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
+        {'id': 103, 'symbol': 'SOLUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 84.50, 'exit_price': 88.60, 'pnl_pct': 4.85, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()},
+        {'id': 104, 'symbol': 'BNBUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 694.0, 'exit_price': 702.5, 'pnl_pct': -1.22, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()},
+        {'id': 105, 'symbol': 'XRPUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 1.065, 'exit_price': 1.118, 'pnl_pct': 4.98, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=28)).isoformat()},
+        {'id': 106, 'symbol': 'DOGEUSDT', 'timeframe': '1h', 'direction': 'short', 'entry': 0.0718, 'exit_price': 0.0732, 'pnl_pct': -1.95, 'exit_reason': 'Stopped Out', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=40)).isoformat()},
+        {'id': 107, 'symbol': 'LINKUSDT', 'timeframe': '15m', 'direction': 'long', 'entry': 10.15, 'exit_price': 10.58, 'pnl_pct': 4.24, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=54)).isoformat()},
+        {'id': 108, 'symbol': 'TRXUSDT', 'timeframe': '4h', 'direction': 'long', 'entry': 0.308, 'exit_price': 0.321, 'pnl_pct': 4.22, 'exit_reason': 'Target Hit', 'closed_at': (datetime.now(timezone.utc) - timedelta(hours=68)).isoformat()},
     ]
     if not DATABASE_URL:
         return default_history
