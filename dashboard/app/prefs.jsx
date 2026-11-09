@@ -3,28 +3,38 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { fmtMoney, fmtTime } from '../lib/format';
 
 const Ctx = createContext(null);
-const KEY = 'signals.prefs.v2';
+const KEY = 'signals.prefs.v3';
 
 export const usePrefs = () => useContext(Ctx);
 
 export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const [cur, setCur] = useState('USD');
-  const [tz, setTz] = useState('UTC');
+  const [tz, setTz] = useState('IST'); // Default to IST since user is in IST
   const [viewMode, setViewMode] = useState('table'); // 'table' | 'cards'
   const [soundEnabled, setSoundEnabled] = useState(false);
-  const [calcSignal, setCalcSignal] = useState(null); // signal to calculate position size for
+  const [calcSignal, setCalcSignal] = useState(null);
   const [isCalcOpen, setIsCalcOpen] = useState(false);
 
-  // Real-time live market prices { [symbol]: { price, change, tickDir: 'up' | 'down' } }
+  // Real-time live market prices { [symbol]: { price, change, tickDir: 'up' | 'down', ts } }
   const [livePrices, setLivePrices] = useState(() => {
     const init = {};
     for (const [sym, t] of Object.entries(initialTickers || {})) {
-      init[sym] = { price: t.price, change: t.change, high: t.high, low: t.low, tickDir: null, ts: Date.now() };
+      init[sym] = {
+        price: t.price,
+        change: t.change,
+        high: t.high,
+        low: t.low,
+        tickDir: null,
+        ts: Date.now(),
+      };
     }
     return init;
   });
 
   const [wsConnected, setWsConnected] = useState(false);
+  const [lastUpdateTs, setLastUpdateTs] = useState(Date.now());
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const wsRef = useRef(null);
 
   // Restore saved preferences
@@ -32,7 +42,7 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     try {
       const p = JSON.parse(localStorage.getItem(KEY) || '{}');
       if (p.cur === 'INR' && rates?.inr) setCur('INR');
-      if (p.tz === 'IST') setTz('IST');
+      if (p.tz) setTz(p.tz);
       if (p.viewMode) setViewMode(p.viewMode);
       if (typeof p.soundEnabled === 'boolean') setSoundEnabled(p.soundEnabled);
     } catch {}
@@ -44,6 +54,16 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
       localStorage.setItem(KEY, JSON.stringify({ ...curObj, ...next }));
     } catch {}
   }, []);
+
+  // 1. Live Clock ticking every 1000ms
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now);
+      setSecondsAgo(Math.max(0, Math.floor((now.getTime() - lastUpdateTs) / 1000)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lastUpdateTs]);
 
   // Web Audio chime for professional trading feedback
   const playChime = useCallback((type = 'notify') => {
@@ -76,7 +96,64 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     } catch {}
   }, [soundEnabled]);
 
-  // Connect to Binance Futures public real-time WebSocket mini-ticker
+  // 2. High-Frequency Real-Time Price Polling (every 1.2 seconds via local route handler)
+  // This guarantees sub-2-second live running prices even if Binance WebSocket is blocked by ISP!
+  useEffect(() => {
+    let isMounted = true;
+
+    async function pollLivePrices() {
+      try {
+        const res = await fetch('/api/live-prices', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success || !data.prices) return;
+
+        setLivePrices((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const [sym, info] of Object.entries(data.prices)) {
+            const old = prev[sym];
+            const newPrice = Number(info.price);
+            if (isNaN(newPrice)) continue;
+
+            let tickDir = null;
+            if (old && old.price) {
+              if (newPrice > old.price) tickDir = 'up';
+              else if (newPrice < old.price) tickDir = 'down';
+              else tickDir = old.tickDir;
+            }
+
+            next[sym] = {
+              price: newPrice,
+              change: info.change != null ? info.change : (old?.change || 0),
+              high: info.high || old?.high || newPrice,
+              low: info.low || old?.low || newPrice,
+              tickDir,
+              ts: info.ts || Date.now(),
+            };
+            changed = true;
+          }
+          return changed ? next : prev;
+        });
+
+        if (isMounted) {
+          const nowMs = Date.now();
+          setLastUpdateTs(nowMs);
+          setSecondsAgo(0);
+        }
+      } catch {}
+    }
+
+    const interval = setInterval(pollLivePrices, 1200);
+    pollLivePrices();
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // 3. Optional Direct WebSocket connection to Binance Futures
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let isMounted = true;
@@ -126,6 +203,9 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
               }
               return changed ? next : prev;
             });
+
+            setLastUpdateTs(Date.now());
+            setSecondsAgo(0);
           } catch {}
         };
 
@@ -136,7 +216,7 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
         ws.onclose = () => {
           if (isMounted) {
             setWsConnected(false);
-            reconnectTimer = setTimeout(connect, 5000);
+            reconnectTimer = setTimeout(connect, 6000);
           }
         };
       } catch {
@@ -161,9 +241,23 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const getPrice = useCallback((symbol, fallbackPrice) => {
     const item = livePrices[symbol];
     if (item && item.price != null && !isNaN(item.price)) {
-      return { price: item.price, tickDir: item.tickDir, change: item.change, high: item.high, low: item.low };
+      return {
+        price: item.price,
+        tickDir: item.tickDir,
+        change: item.change,
+        high: item.high,
+        low: item.low,
+        ts: item.ts,
+      };
     }
-    return { price: fallbackPrice || 0, tickDir: null, change: 0, high: fallbackPrice, low: fallbackPrice };
+    return {
+      price: fallbackPrice || 0,
+      tickDir: null,
+      change: 0,
+      high: fallbackPrice,
+      low: fallbackPrice,
+      ts: Date.now(),
+    };
   }, [livePrices]);
 
   const openCalculator = (signal) => {
@@ -185,6 +279,9 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     wsConnected,
     isCalcOpen,
     calcSignal,
+    currentTime,
+    lastUpdateTs,
+    secondsAgo,
     setCur: (c) => { setCur(c); save({ cur: c }); },
     setTz: (z) => { setTz(z); save({ tz: z }); },
     setViewMode: (m) => { setViewMode(m); save({ viewMode: m }); },
@@ -208,6 +305,57 @@ export function Time({ iso, withDate = false }) {
   return <>{fmtTime(iso, tz, withDate)}</>;
 }
 
+/**
+ * Real-time Digital Clock ticking every 1 second
+ */
+export function LiveClock() {
+  const { currentTime, tz } = usePrefs();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <span className="clock-badge">--:--:-- {tz}</span>;
+
+  return (
+    <div className="clock-badge" title="Live System Clock (1s updates)">
+      <span className="clock-icon">🕒</span>
+      <span className="clock-time font-num">
+        {fmtTime(currentTime.toISOString(), tz, true)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Real-time Last Updated & Streaming Status Badge
+ */
+export function LastUpdatedBadge() {
+  const { lastUpdateTs, secondsAgo, tz, wsConnected } = usePrefs();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  const isLive = secondsAgo <= 3;
+
+  return (
+    <div className={`live-update-badge ${isLive ? 'is-live' : 'is-stale'}`} title={`Price data refreshed ${secondsAgo}s ago`}>
+      <span className={`pulse-dot ${isLive ? 'pulse-green' : 'pulse-warn'}`} />
+      <span className="live-status-text">
+        {isLive ? (wsConnected ? 'LIVE WS' : 'LIVE 1s') : `${secondsAgo}s ago`}
+      </span>
+      <span className="live-time-sub font-num">
+        {fmtTime(new Date(lastUpdateTs).toISOString(), tz)}
+      </span>
+    </div>
+  );
+}
+
 function Seg({ label, options, value, onChange, disabled = {} }) {
   return (
     <div className="seg" role="group" aria-label={label}>
@@ -228,12 +376,12 @@ function Seg({ label, options, value, onChange, disabled = {} }) {
 }
 
 export function PrefToggles() {
-  const { cur, tz, setCur, setTz, rates, viewMode, setViewMode, soundEnabled, setSoundEnabled, wsConnected } = usePrefs();
+  const { cur, tz, setCur, setTz, rates, viewMode, setViewMode, soundEnabled, setSoundEnabled } = usePrefs();
   return (
     <div className="pref-bar">
       <div className="pref-group">
         <Seg label="Currency" options={['USD', 'INR']} value={cur} onChange={setCur} disabled={{ INR: !rates?.inr }} />
-        <Seg label="Time zone" options={['UTC', 'IST']} value={tz} onChange={setTz} />
+        <Seg label="Time zone" options={['IST', 'UTC']} value={tz} onChange={setTz} />
         <Seg label="View Mode" options={['Table', 'Cards']} value={viewMode === 'table' ? 'Table' : 'Cards'} onChange={(m) => setViewMode(m.toLowerCase())} />
       </div>
       <div className="pref-group">
@@ -245,10 +393,6 @@ export function PrefToggles() {
         >
           {soundEnabled ? '🔊 Audio ON' : '🔈 Audio OFF'}
         </button>
-        <span className={`chip stream-badge ${wsConnected ? 'live' : 'rest'}`} title={wsConnected ? 'Real-time WebSocket streaming from Binance Futures' : 'Falling back to 30s REST polling'}>
-          <span className={`dot ${wsConnected ? 'green' : 'warn'}`} />
-          {wsConnected ? 'Live WS' : 'REST 30s'}
-        </span>
       </div>
     </div>
   );

@@ -27,6 +27,10 @@ export function MarketTickerTape({ tickers = {} }) {
   return (
     <div className="ticker-tape">
       <div className="ticker-scroll">
+        <div className="ticker-brand-badge">
+          <span className="live-dot" />
+          <span>BINANCE FUTURES</span>
+        </div>
         {pairs.map((sym) => {
           const baseTick = tickers[sym] || {};
           const live = getPrice(sym, baseTick.price);
@@ -278,14 +282,22 @@ export function SignalsPanel({ signals = [] }) {
                     {/* Live Market Price (CMP) */}
                     <td>
                       <div className={`cmp-cell ${tickClass}`}>
-                        <span className="cmp-val font-num">
-                          <Money value={s.livePrice} />
-                        </span>
-                        {s.change_24h != null && (
-                          <span className={`change-badge ${s.change_24h >= 0 ? 'pos' : 'neg'}`}>
-                            {s.change_24h >= 0 ? '+' : ''}{Number(s.change_24h).toFixed(1)}%
+                        <div className="cmp-header-row">
+                          <span className="live-dot pulse" />
+                          <span className="cmp-val font-num">
+                            <Money value={s.livePrice} />
                           </span>
-                        )}
+                        </div>
+                        <div className="cmp-sub-row">
+                          {s.change_24h != null && (
+                            <span className={`change-badge ${s.change_24h >= 0 ? 'pos' : 'neg'}`}>
+                              {s.change_24h >= 0 ? '▲' : '▼'}{Math.abs(Number(s.change_24h)).toFixed(1)}%
+                            </span>
+                          )}
+                          <span className="cmp-diff-tag" title="Difference from Expected Entry">
+                            {s.livePrice >= s.entry ? '+' : ''}{(s.livePrice - s.entry).toFixed(s.livePrice < 1 ? 4 : 1)}
+                          </span>
+                        </div>
                       </div>
                     </td>
 
@@ -399,10 +411,15 @@ export function SignalsPanel({ signals = [] }) {
                       {isLong ? '▲ LONG' : '▼ SHORT'}
                     </span>
                   </div>
-                  <div className="card-cmp-box">
-                    <span className="cmp-label">LIVE CMP</span>
+                  <div className={`card-cmp-box ${s.tickDir ? `tick-${s.tickDir}` : ''}`}>
+                    <span className="cmp-label">
+                      <span className="live-dot pulse" /> LIVE CMP (1s)
+                    </span>
                     <span className="card-cmp font-num">
                       <Money value={s.livePrice} />
+                    </span>
+                    <span className="cmp-diff-tag">
+                      {s.livePrice >= s.entry ? '+' : ''}{(s.livePrice - s.entry).toFixed(s.livePrice < 1 ? 4 : 1)} diff
                     </span>
                   </div>
                 </div>

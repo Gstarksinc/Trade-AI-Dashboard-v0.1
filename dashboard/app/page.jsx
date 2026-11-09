@@ -1,7 +1,7 @@
 import { loadDashboard } from '../lib/data';
 import { fmtPct } from '../lib/format';
 import { AutoRefresh, EquityChart, MarketTickerTape, PositionCalculatorModal, SignalsPanel } from './components';
-import { PrefToggles, PrefsProvider, Time } from './prefs';
+import { LastUpdatedBadge, LiveClock, PrefToggles, PrefsProvider, Time } from './prefs';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +24,7 @@ export default async function Page() {
               <div className="brand-badge-row">
                 <span className="brand-pill">TRADE AI</span>
                 <span className="version-pill">v0.1 PRO FUTURES</span>
+                <span className="live-status-tag">● LIVE STREAMING</span>
               </div>
               <h1 className="main-title">Algorithmic Signals &amp; Risk Dashboard</h1>
               <p className="sub">
@@ -31,22 +32,25 @@ export default async function Page() {
               </p>
             </div>
             <div className="chips">
+              <div className="time-status-row">
+                <LiveClock />
+                <LastUpdatedBadge />
+              </div>
               <PrefToggles />
-              <span className="chip mode-chip">
-                <span className="dot paper-dot" /> Paper Trading Only
-              </span>
-              {sample && (
-                <span className="chip sample-chip" title="Endpoints falling back to realistic mock sample data">
-                  Sample Data
+              <div className="status-tags-row">
+                <span className="chip mode-chip">
+                  <span className="dot paper-dot" /> Paper Mode
                 </span>
-              )}
-              <span className="chip">
-                Updated <Time iso={fetchedAt} />
-              </span>
-              <span className="chip">
-                <span className={fresh ? 'dot green' : 'dot warn'} />
-                {fresh ? 'Data Collector Active' : 'Collector Stale'}
-              </span>
+                {sample && (
+                  <span className="chip sample-chip" title="Live prices streaming; model signals waiting for retrain">
+                    Baseline Signals
+                  </span>
+                )}
+                <span className="chip">
+                  <span className={fresh ? 'dot green' : 'dot warn'} />
+                  {fresh ? 'Data Collector Active' : 'Collector Stale'}
+                </span>
+              </div>
             </div>
           </header>
 

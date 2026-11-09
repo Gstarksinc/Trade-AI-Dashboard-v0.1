@@ -67,9 +67,23 @@ body {
 .ticker-scroll {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   max-width: 1440px;
   margin: 0 auto;
+}
+
+.ticker-brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #10B981;
 }
 
 .ticker-item {
@@ -163,6 +177,120 @@ body {
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 4px;
+}
+
+.live-status-tag {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10B981;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.time-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.clock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: var(--color-accent);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.clock-icon { font-size: 13px; }
+.clock-time { color: #FFFFFF; font-weight: 700; }
+
+.live-update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.live-update-badge.is-stale {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.pulse-dot.pulse-green {
+  background: #10B981;
+  box-shadow: 0 0 8px #10B981;
+  animation: pulseGreen 1.5s infinite;
+}
+.pulse-dot.pulse-warn {
+  background: #F59E0B;
+}
+
+@keyframes pulseGreen {
+  0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.8); }
+  70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.live-status-text {
+  font-weight: 800;
+  color: #10B981;
+  letter-spacing: 0.04em;
+}
+.is-stale .live-status-text { color: #F59E0B; }
+.live-time-sub {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.status-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cmp-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10B981;
+  display: inline-block;
+}
+.live-dot.pulse {
+  animation: pulseGreen 1.5s infinite;
+}
+.cmp-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.cmp-diff-tag {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
 }
 
 .main-title {
