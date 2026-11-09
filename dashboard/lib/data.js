@@ -13,14 +13,14 @@ function nextSunday0200() {
 
 // Default fallback tickers matching real Binance Futures prices
 const DEFAULT_TICKERS = {
-  BTCUSDT: { price: 74880.0, change: 1.85, high: 75575.0, low: 73715.0, vol: '6.5B' },
-  ETHUSDT: { price: 2123.5, change: -1.42, high: 2180.0, low: 2090.0, vol: '1.8B' },
-  SOLUSDT: { price: 86.68, change: -2.15, high: 91.20, low: 84.50, vol: '840M' },
-  BNBUSDT: { price: 686.80, change: 0.32, high: 698.0, low: 678.0, vol: '310M' },
-  XRPUSDT: { price: 1.1043, change: 2.12, high: 1.152, low: 1.075, vol: '520M' },
-  DOGEUSDT: { price: 0.06975, change: -1.75, high: 0.0735, low: 0.0678, vol: '290M' },
-  LINKUSDT: { price: 10.598, change: 1.15, high: 11.20, low: 10.25, vol: '180M' },
-  TRXUSDT: { price: 0.3176, change: 0.45, high: 0.324, low: 0.311, vol: '95M' },
+  BTCUSDT: { price: 74880.0, change: 1.85, high: 75575.0, low: 73715.0, vol: 6520000000, fundingRate: 0.0001, markPrice: 74885.0 },
+  ETHUSDT: { price: 2123.5, change: -1.42, high: 2180.0, low: 2090.0, vol: 1840000000, fundingRate: 0.0001, markPrice: 2124.0 },
+  SOLUSDT: { price: 86.68, change: -2.15, high: 91.20, low: 84.50, vol: 840000000, fundingRate: 0.00005, markPrice: 86.70 },
+  BNBUSDT: { price: 686.80, change: 0.32, high: 698.0, low: 678.0, vol: 310000000, fundingRate: 0.00005, markPrice: 686.90 },
+  XRPUSDT: { price: 1.1043, change: 2.12, high: 1.152, low: 1.075, vol: 520000000, fundingRate: 0.0001, markPrice: 1.1045 },
+  DOGEUSDT: { price: 0.06975, change: -1.75, high: 0.0735, low: 0.0678, vol: 290000000, fundingRate: 0.0001, markPrice: 0.0698 },
+  LINKUSDT: { price: 10.598, change: 1.15, high: 11.20, low: 10.25, vol: 180000000, fundingRate: 0.00005, markPrice: 10.60 },
+  TRXUSDT: { price: 0.3176, change: 0.45, high: 0.324, low: 0.311, vol: 95000000, fundingRate: 0.00005, markPrice: 0.318 },
 };
 
 // Shown when API endpoints are initializing. All prices are pure Binance USDT perpetuals.
@@ -230,30 +230,51 @@ async function get(path, fallback) {
   }
 }
 
-// Fetches live 24h ticker prices from Binance Futures public REST endpoint.
+// Fetches live 24h ticker prices and funding rates from Binance Futures public REST endpoint.
 async function loadBinanceTickers() {
   const tracked = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'];
   try {
-    const res = await fetch(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, {
-      next: { revalidate: 10 },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const list = await res.json();
+    const [tRes, fRes] = await Promise.allSettled([
+      fetch(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, {
+        next: { revalidate: 10 },
+        signal: AbortSignal.timeout(3000),
+      }),
+      fetch(`${BINANCE_FAPI}/fapi/v1/premiumIndex`, {
+        next: { revalidate: 30 },
+        signal: AbortSignal.timeout(3000),
+      }),
+    ]);
+
     const map = {};
-    for (const item of list) {
-      if (tracked.includes(item.symbol)) {
-        map[item.symbol] = {
-          symbol: item.symbol,
-          price: Number(item.lastPrice),
-          change: Number(item.priceChangePercent),
-          high: Number(item.highPrice),
-          low: Number(item.lowPrice),
-          vol: Number(item.quoteVolume),
-        };
+    if (tRes.status === 'fulfilled' && tRes.value.ok) {
+      const list = await tRes.value.json();
+      for (const item of list) {
+        if (tracked.includes(item.symbol)) {
+          map[item.symbol] = {
+            symbol: item.symbol,
+            price: Number(item.lastPrice),
+            change: Number(item.priceChangePercent),
+            high: Number(item.highPrice),
+            low: Number(item.lowPrice),
+            vol: Number(item.quoteVolume),
+            fundingRate: 0.0001,
+            markPrice: Number(item.lastPrice),
+          };
+        }
       }
     }
-    return map;
+
+    if (fRes.status === 'fulfilled' && fRes.value.ok) {
+      const pList = await fRes.value.json();
+      for (const item of pList) {
+        if (map[item.symbol]) {
+          map[item.symbol].fundingRate = Number(item.lastFundingRate);
+          map[item.symbol].markPrice = Number(item.markPrice);
+        }
+      }
+    }
+
+    return Object.keys(map).length > 0 ? map : DEFAULT_TICKERS;
   } catch {
     return DEFAULT_TICKERS;
   }

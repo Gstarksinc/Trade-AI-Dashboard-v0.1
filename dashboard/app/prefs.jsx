@@ -42,6 +42,9 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
         change: t.change,
         high: t.high,
         low: t.low,
+        vol: t.vol,
+        fundingRate: t.fundingRate,
+        markPrice: t.markPrice,
         tickDir: null,
         ts: Date.now(),
       };

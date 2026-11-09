@@ -1,8 +1,15 @@
 'use client';
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { calcTradeMetrics, fmtDuration, fmtPct, fmtTime, SIGNAL_PHASES } from '../lib/format';
 import { LastUpdatedBadge, LiveClock, Money, PrefToggles, RateNote, Time, usePrefs } from './prefs';
+import { AccountSummaryCard } from './views/AccountSummary';
+import { MarketsView } from './views/MarketsView';
+import { PositionsView } from './views/PositionsView';
+import { CandlestickChartView } from './views/CandlestickChart';
+import { BacktestView } from './views/BacktestView';
+import { ModelSystemView } from './views/ModelSystemView';
+import { OverviewView } from './views/OverviewView';
 
 const TIMEFRAMES = ['All', '15m', '1h', '4h'];
 const DIRECTIONS = ['All', 'Long', 'Short'];
@@ -226,15 +233,31 @@ export function StatusBadge({ phase, floatingPnlPct }) {
 /**
  * Main Signals & History Panel with Tabs, Filters, and Crash-Proof Handlers
  */
-export function SignalsPanel({ signals = [], history = [] }) {
+export function SignalsPanel({
+  signals = [],
+  history = [],
+  defaultTab = 'signals',
+  onSelectChartSymbol,
+  onOpenCalculator,
+}) {
   const { getPrice, viewMode, openCalculator } = usePrefs();
-  const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'history'
+  const [activeTab, setActiveTab] = useState(defaultTab); // 'signals' | 'history'
   const [tf, setTf] = useState('All');
   const [direction, setDirection] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [historySpan, setHistorySpan] = useState('All Time');
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('time');
+  const [histPage, setHistPage] = useState(1);
+  const pageSize = 10;
+
+  useEffect(() => {
+    setActiveTab(defaultTab);
+  }, [defaultTab]);
+
+  useEffect(() => {
+    setHistPage(1);
+  }, [tf, search, historySpan]);
 
   // Real-time tracking of filled entries and session completed trades
   const [completedTrades, setCompletedTrades] = useState([]);
@@ -396,6 +419,12 @@ export function SignalsPanel({ signals = [], history = [] }) {
       return true;
     }).sort((a, b) => new Date(b?.closed_at || 0) - new Date(a?.closed_at || 0));
   }, [historyList, tf, search, historySpan]);
+
+  const totalHistPages = Math.ceil(filteredHistory.length / pageSize) || 1;
+  const paginatedHistory = useMemo(() => {
+    const start = (histPage - 1) * pageSize;
+    return filteredHistory.slice(start, start + pageSize);
+  }, [filteredHistory, histPage, pageSize]);
 
   return (
     <div className="card main-panel">
@@ -918,7 +947,7 @@ export function SignalsPanel({ signals = [], history = [] }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredHistory.map((h, i) => {
+                {paginatedHistory.map((h, i) => {
                   const isLong = String(h.direction || '').toLowerCase() === 'long';
                   const isWin = (h.pnl_pct || 0) > 0 || String(h.exit_reason || '').toLowerCase().includes('target');
                   const targetElapsed = isWin ? fmtDuration(h.opened_at, h.target_hit_at || h.closed_at) : '—';
@@ -996,6 +1025,35 @@ export function SignalsPanel({ signals = [], history = [] }) {
                 })}
               </tbody>
             </table>
+
+            {/* Pagination Controls & N of M Indicator */}
+            {filteredHistory.length > 0 && (
+              <div className="pagination-bar">
+                <span className="pagination-counter sub font-num">
+                  Showing {Math.min(filteredHistory.length, (histPage - 1) * pageSize + 1)}–{Math.min(filteredHistory.length, histPage * pageSize)} of {filteredHistory.length} completed trades
+                </span>
+                <div className="pagination-controls">
+                  <button
+                    className="filter-pill"
+                    disabled={histPage <= 1}
+                    onClick={() => setHistPage((p) => Math.max(1, p - 1))}
+                  >
+                    ← Previous
+                  </button>
+                  <span className="page-pill font-num">
+                    Page {histPage} of {totalHistPages}
+                  </span>
+                  <button
+                    className="filter-pill"
+                    disabled={histPage >= totalHistPages}
+                    onClick={() => setHistPage((p) => Math.min(totalHistPages, p + 1))}
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+
             {filteredHistory.length === 0 && (
               <div className="empty-state">
                 <p className="sub pad">No completed trade history recorded for this time range.</p>
@@ -1484,6 +1542,9 @@ export function SignInPortal({ onLogin, tickers = {} }) {
 /**
  * Full-Screen Responsive Trading Terminal Shell with Authentication & Theme Management
  */
+/**
+ * Full-Screen Responsive Trading Terminal Shell with Multi-View Workflows & Navigation
+ */
 export function DashboardShell({
   summary: s,
   signals,
@@ -1497,7 +1558,40 @@ export function DashboardShell({
   sample,
   fresh,
 }) {
-  const { authSession, isAuthChecking, login } = usePrefs();
+  const { authSession, isAuthChecking, login, logout, wsConnected, openCalculator } = usePrefs();
+  const [activeNav, setActiveNav] = useState('overview'); // 'overview' | 'markets' | 'signals' | 'positions' | 'history' | 'charts' | 'backtest' | 'system'
+  const [selectedChartSymbol, setSelectedChartSymbol] = useState('BTCUSDT');
+  const [sessionClosedTrades, setSessionClosedTrades] = useState([]);
+
+  // Merge session-closed trades into history
+  const combinedHistory = useMemo(() => {
+    const base = Array.isArray(history) ? history : [];
+    const closedIds = new Set(base.map((h) => h.id));
+    const newItems = sessionClosedTrades.filter((t) => !closedIds.has(t.id));
+    return [...newItems, ...base];
+  }, [history, sessionClosedTrades]);
+
+  // Simulate market close action for an open position
+  const handleSimulateClose = useCallback((pos) => {
+    if (!pos) return;
+    const isWin = (pos.metrics?.floatingPnlPct || 0) >= 0;
+    const nowIso = new Date().toISOString();
+    const closedTrade = {
+      id: `manual-exit-${pos.id || pos.symbol}-${Date.now()}`,
+      symbol: pos.symbol,
+      timeframe: pos.timeframe || '1h',
+      direction: pos.direction,
+      entry: pos.entry,
+      exit_price: pos.livePrice,
+      pnl_pct: pos.metrics?.floatingPnlPct || 0,
+      exit_reason: isWin ? 'Target Hit (Simulated Exit)' : 'Stop Loss (Simulated Exit)',
+      predicted_at: pos.created_at || null,
+      opened_at: pos.opened_at || pos.created_at || nowIso,
+      closed_at: nowIso,
+      target_hit_at: isWin ? nowIso : null,
+    };
+    setSessionClosedTrades((prev) => [closedTrade, ...prev]);
+  }, []);
 
   // If checking authentication from localStorage, show brief smooth placeholder
   if (isAuthChecking) {
@@ -1514,16 +1608,19 @@ export function DashboardShell({
     return <SignInPortal onLogin={login} tickers={tickers} />;
   }
 
-  const up = (v) => (v === 'ok' ? 'OK' : 'Unreachable');
+  const activePositionsCount = (signals || []).filter(
+    (sig) => sig.is_confirmed && sig.metrics?.phase === 'ORDER_IN_PROGRESS'
+  ).length;
 
-  // Complete, responsive, full-page trading terminal
+  const confirmedSignalsCount = (signals || []).filter((sig) => sig.is_confirmed).length;
+
   return (
     <main className="page full-screen-terminal">
       {/* Real-time Market Ticker Tape with ZERO scrollbars */}
       <MarketTickerTape tickers={tickers} />
 
       <div className="wrap">
-        {/* Main Top Header */}
+        {/* Main Top Header & Global Controls */}
         <header className="top">
           <div>
             <div className="brand-badge-row">
@@ -1536,128 +1633,185 @@ export function DashboardShell({
               LightGBM + Meta-Labeling • 15m, 1h and 4h horizons across {s?.symbols_scanned || 8} active perpetuals
             </p>
           </div>
+
           <div className="chips">
             <div className="time-status-row">
               <LiveClock />
               <LastUpdatedBadge />
             </div>
+
+            {/* Global Settings (Theme, Currency, Timezone) */}
             <PrefToggles />
-            <div className="status-tags-row">
-              <span className="chip mode-chip">
-                <span className="dot paper-dot" /> Paper Mode
+
+            {/* Dual Status Indicators: Live Price Stream vs Signals Collector */}
+            <div className="dual-status-wrap">
+              <span className="status-pill-feed live" title="Real-time Binance Futures price stream">
+                <span className="live-dot pulse" />
+                {wsConnected ? 'Price Stream: LIVE WS' : 'Price Stream: LIVE 1s'}
               </span>
-              {sample && (
-                <span className="chip sample-chip" title="Live Binance prices streaming; baseline predictive signals active">
-                  Baseline Signals
-                </span>
-              )}
-              <span className="chip">
-                <span className={fresh ? 'dot green' : 'dot warn'} />
-                {fresh ? 'Binance Collector Active' : 'Collector Stale'}
+
+              <span
+                className={`status-pill-feed ${fresh ? 'live' : 'warn'}`}
+                title={fresh ? 'TimescaleDB candles updated within 20m' : 'Candle ingestion delayed'}
+              >
+                <span className={`dot ${fresh ? 'green' : 'warn'}`} />
+                {fresh ? 'Collector: Active' : 'Collector: Stale (>20m)'}
+              </span>
+
+              <span className="chip mode-chip" title="Simulated execution with zero real financial risk">
+                <span className="dot paper-dot" /> Paper Trading
               </span>
             </div>
           </div>
         </header>
 
-        {/* Interactive Session Controller (Data Available, Start Session, Reset Win Rate) */}
-        <SessionController dataDays={dataDays} />
+        {/* Global Navigation Bar */}
+        <nav className="main-nav-bar" aria-label="Dashboard views">
+          <button
+            className={`nav-tab ${activeNav === 'overview' ? 'active' : ''}`}
+            onClick={() => setActiveNav('overview')}
+          >
+            🏠 Overview
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'markets' ? 'active' : ''}`}
+            onClick={() => setActiveNav('markets')}
+          >
+            📊 Markets ({Object.keys(tickers || {}).length || 8})
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'signals' ? 'active' : ''}`}
+            onClick={() => setActiveNav('signals')}
+          >
+            📡 Signals
+            {confirmedSignalsCount > 0 && (
+              <span className="nav-count-badge">{confirmedSignalsCount}</span>
+            )}
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'positions' ? 'active' : ''}`}
+            onClick={() => setActiveNav('positions')}
+          >
+            💼 Positions
+            {activePositionsCount > 0 && (
+              <span className="nav-count-badge active">{activePositionsCount}</span>
+            )}
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'history' ? 'active' : ''}`}
+            onClick={() => setActiveNav('history')}
+          >
+            📜 Trade History ({combinedHistory.length})
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'charts' ? 'active' : ''}`}
+            onClick={() => setActiveNav('charts')}
+          >
+            📈 Candlestick Charts
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'backtest' ? 'active' : ''}`}
+            onClick={() => setActiveNav('backtest')}
+          >
+            🧪 Backtest Report
+          </button>
+          <button
+            className={`nav-tab ${activeNav === 'system' ? 'active' : ''}`}
+            onClick={() => setActiveNav('system')}
+          >
+            🧠 Model &amp; System
+          </button>
+        </nav>
 
-        {/* Key Performance Indicators */}
-        <section className="kpis">
-          <div className="card kpi-card">
-            <p className="h">Active Signals</p>
-            <p className="big font-num">{s?.open_signals || 0}</p>
-            <p className="sub">of {s?.symbols_scanned || 8} monitored symbols</p>
-          </div>
-          <div className="card kpi-card">
-            <p className="h">Tracked Win Rate</p>
-            <p className="big font-num text-tp">{fmtPct(s?.win_rate_30d)}</p>
-            <p className="sub">{s?.closed_30d || 0} closed paper trades (Session)</p>
-          </div>
-          <div className="card kpi-card">
-            <p className="h">Net P&amp;L (30D)</p>
-            <p className={`big font-num ${(s?.net_pnl_30d || 0) >= 0 ? 'text-tp' : 'text-sl'}`}>
-              {fmtPct(s?.net_pnl_30d, true)}
-            </p>
-            <p className="sub">after fees, slippage &amp; funding</p>
-          </div>
-          <div className="card kpi-card">
-            <p className="h">Max Drawdown</p>
-            <p className="big font-num text-sl">{fmtPct(s?.max_drawdown)}</p>
-            <p className="sub">within limit {fmtPct(s?.drawdown_limit || 8.0)}</p>
-          </div>
-        </section>
+        {/* View Routing */}
+        {activeNav === 'overview' && (
+          <OverviewView
+            summary={s}
+            signals={signals}
+            equity={equity}
+            tickers={tickers}
+            status={st}
+            dataDays={dataDays}
+            fresh={fresh}
+            onNavigate={setActiveNav}
+            onSelectChartSymbol={(sym) => {
+              setSelectedChartSymbol(sym);
+              setActiveNav('charts');
+            }}
+            onOpenCalculator={openCalculator}
+          />
+        )}
 
-        {/* Main Grid: Signals & History Panel (Left) & Risk / Health Panels (Right) */}
-        <section className="grid">
-          <SignalsPanel signals={signals} history={history} />
+        {activeNav === 'markets' && (
+          <MarketsView
+            tickers={tickers}
+            signals={signals}
+            onSelectChartSymbol={(sym) => {
+              setSelectedChartSymbol(sym);
+              setActiveNav('charts');
+            }}
+            onOpenCalculator={openCalculator}
+          />
+        )}
 
-          <div className="side">
-            {/* Paper Equity Curve */}
-            <div className="card side-card">
-              <h2 className="h">Paper Equity Curve (30 Days)</h2>
-              <EquityChart points={equity} />
-            </div>
+        {activeNav === 'signals' && (
+          <SignalsPanel
+            signals={signals}
+            history={combinedHistory}
+            defaultTab="signals"
+            onSelectChartSymbol={(sym) => {
+              setSelectedChartSymbol(sym);
+              setActiveNav('charts');
+            }}
+            onOpenCalculator={openCalculator}
+          />
+        )}
 
-            {/* Pipeline & Model Health */}
-            <div className="card side-card">
-              <h2 className="h">Pipeline Health &amp; Model</h2>
-              <div className="kv">
-                <span>FastAPI Service</span>
-                <span className={health ? 'text-tp' : 'text-sl'}>{health ? 'Online' : 'Unreachable'}</span>
-              </div>
-              <div className="kv">
-                <span>TimescaleDB (Hypertables)</span>
-                <span className={health?.db === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.db)}</span>
-              </div>
-              <div className="kv">
-                <span>Redis Memory Cache</span>
-                <span className={health?.redis === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.redis)}</span>
-              </div>
-              <div className="kv">
-                <span>Data Available</span>
-                <span className="font-num text-tp">{dataDays} Days</span>
-              </div>
-              <div className="kv">
-                <span>Data Source</span>
-                <span className="font-num text-cyan">Binance USD-M (CoinGecko Off)</span>
-              </div>
-              <div className="kv">
-                <span>Active Model</span>
-                <span className="font-num text-cyan">{st?.model_version || 'LightGBM-v0.1'}</span>
-              </div>
-              <div className="kv">
-                <span>Next Retrain Run</span>
-                <span><Time iso={st?.next_retrain} withDate /></span>
-              </div>
-            </div>
+        {activeNav === 'positions' && (
+          <PositionsView
+            signals={signals}
+            onSelectChartSymbol={(sym) => {
+              setSelectedChartSymbol(sym);
+              setActiveNav('charts');
+            }}
+            onSimulateClose={handleSimulateClose}
+            onNavigate={setActiveNav}
+          />
+        )}
 
-            {/* Risk Engine & Constraints */}
-            <div className="card side-card">
-              <h2 className="h">Risk Engine Controls</h2>
-              <div className="kv">
-                <span>Daily Loss Used</span>
-                <span className="font-num">
-                  {st?.daily_loss_used || 0}% of {st?.daily_loss_limit || 3.0}% max
-                </span>
-              </div>
-              <div className="kv">
-                <span>Max Simulated Leverage</span>
-                <span className="font-num text-cyan">{st?.max_leverage || 3.0}x isolated</span>
-              </div>
-              <div className="kv">
-                <span>Correlated Open Signals</span>
-                <span className="font-num">
-                  {st?.correlated_open || 0} of {st?.correlated_cap || 3} cap
-                </span>
-              </div>
-              <div className="kv">
-                <span>Market Regime</span>
-                <span className="regime-tag">{st?.market_regime || 'Normal Volatility'}</span>
-              </div>
-            </div>
-          </div>
-        </section>
+        {activeNav === 'history' && (
+          <SignalsPanel
+            signals={signals}
+            history={combinedHistory}
+            defaultTab="history"
+            onSelectChartSymbol={(sym) => {
+              setSelectedChartSymbol(sym);
+              setActiveNav('charts');
+            }}
+            onOpenCalculator={openCalculator}
+          />
+        )}
+
+        {activeNav === 'charts' && (
+          <CandlestickChartView
+            initialSymbol={selectedChartSymbol}
+            signals={signals}
+            equity={equity}
+          />
+        )}
+
+        {activeNav === 'backtest' && (
+          <BacktestView equity={equity} />
+        )}
+
+        {activeNav === 'system' && (
+          <ModelSystemView
+            status={st}
+            health={health}
+            dataDays={dataDays}
+            fresh={fresh}
+          />
+        )}
       </div>
 
       {/* Interactive Position Size & Risk Calculator Modal */}

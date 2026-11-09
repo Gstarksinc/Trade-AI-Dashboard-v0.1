@@ -41,12 +41,19 @@ export function fmtTime(iso, tz = 'IST', withDate = false) {
 }
 
 export function fmtCompact(n) {
-  if (n == null || isNaN(n)) return '-';
+  if (n == null || isNaN(n)) return '—';
   const abs = Math.abs(n);
   if (abs >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (abs >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (abs >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return String(n);
+}
+
+export function fmtFundingRate(r) {
+  if (r == null || isNaN(r)) return '—';
+  const pct = Number(r) * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(4)}%`;
 }
 
 /**
