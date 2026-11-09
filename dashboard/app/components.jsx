@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { calcTradeMetrics, fmtPct } from '../lib/format';
+import { calcTradeMetrics, fmtPct, fmtTime } from '../lib/format';
 import { Money, RateNote, Time, usePrefs } from './prefs';
 
 const TIMEFRAMES = ['All', '15m', '1h', '4h'];
