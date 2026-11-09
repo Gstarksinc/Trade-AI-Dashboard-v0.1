@@ -1,6 +1,6 @@
 import { loadDashboard } from '../lib/data';
 import { fmtPct } from '../lib/format';
-import { AutoRefresh, EquityChart, SignalsPanel } from './components';
+import { AutoRefresh, EquityChart, MarketTickerTape, PositionCalculatorModal, SignalsPanel } from './components';
 import { PrefToggles, PrefsProvider, Time } from './prefs';
 
 export const dynamic = 'force-dynamic';
@@ -8,60 +8,147 @@ export const dynamic = 'force-dynamic';
 const up = (v) => (v === 'ok' ? 'OK' : 'Unreachable');
 
 export default async function Page() {
-  const { summary: s, signals, equity, status: st, health, rates, fetchedAt, sample } = await loadDashboard();
-  const fresh = st.last_candle_age_min <= 20;
+  const { summary: s, signals, equity, status: st, health, rates, tickers, fetchedAt, sample } = await loadDashboard();
+  const fresh = (st.last_candle_age_min || 0) <= 20;
+
   return (
-    <PrefsProvider rates={rates}>
-    <main className="page">
-      <div className="wrap">
-        <header className="top">
-          <div>
-            <h1>Signal Dashboard</h1>
-            <p className="sub">Crypto futures: 15m, 1h and 4h signals across {s.symbols_scanned} symbols</p>
-          </div>
-          <div className="chips">
-            <PrefToggles />
-            <span className="chip">Paper mode</span>
-            {sample && <span className="chip">Sample data</span>}
-            <span className="chip">Updated <Time iso={fetchedAt} /></span>
-            <span className="chip"><span className={fresh ? 'dot' : 'dot warn'} />{fresh ? 'Collector healthy' : 'Collector stale'}</span>
-          </div>
-        </header>
+    <PrefsProvider rates={rates} initialTickers={tickers}>
+      <main className="page">
+        {/* Real-time Market Ticker Tape */}
+        <MarketTickerTape tickers={tickers} />
 
-        <section className="kpis">
-          <div className="card"><p className="h">Open signals</p><p className="big">{s.open_signals}</p><p className="sub">of {s.symbols_scanned} symbols scanned</p></div>
-          <div className="card"><p className="h">Win rate, 30 days</p><p className="big">{fmtPct(s.win_rate_30d)}</p><p className="sub">{s.closed_30d} closed signals</p></div>
-          <div className="card"><p className="h">Net P&amp;L, 30 days</p><p className="big">{fmtPct(s.net_pnl_30d, true)}</p><p className="sub">after fees, slippage, funding</p></div>
-          <div className="card"><p className="h">Max drawdown</p><p className="big">{fmtPct(s.max_drawdown)}</p><p className="sub">limit {fmtPct(s.drawdown_limit)}</p></div>
-        </section>
+        <div className="wrap">
+          {/* Main Top Header */}
+          <header className="top">
+            <div>
+              <div className="brand-badge-row">
+                <span className="brand-pill">TRADE AI</span>
+                <span className="version-pill">v0.1 PRO FUTURES</span>
+              </div>
+              <h1 className="main-title">Algorithmic Signals &amp; Risk Dashboard</h1>
+              <p className="sub">
+                LightGBM + Meta-Labeling • 15m, 1h and 4h horizons across {s.symbols_scanned} active perpetuals
+              </p>
+            </div>
+            <div className="chips">
+              <PrefToggles />
+              <span className="chip mode-chip">
+                <span className="dot paper-dot" /> Paper Trading Only
+              </span>
+              {sample && (
+                <span className="chip sample-chip" title="Endpoints falling back to realistic mock sample data">
+                  Sample Data
+                </span>
+              )}
+              <span className="chip">
+                Updated <Time iso={fetchedAt} />
+              </span>
+              <span className="chip">
+                <span className={fresh ? 'dot green' : 'dot warn'} />
+                {fresh ? 'Data Collector Active' : 'Collector Stale'}
+              </span>
+            </div>
+          </header>
 
-        <section className="grid">
-          <SignalsPanel signals={signals} />
-          <div className="side">
-            <div className="card">
-              <h2 className="h">Paper equity, 30 days</h2>
-              <EquityChart points={equity} />
+          {/* Key Performance Indicators */}
+          <section className="kpis">
+            <div className="card kpi-card">
+              <p className="h">Active Signals</p>
+              <p className="big font-num">{s.open_signals}</p>
+              <p className="sub">of {s.symbols_scanned} monitored symbols</p>
             </div>
-            <div className="card">
-              <h2 className="h">Pipeline health</h2>
-              <div className="kv"><span>API</span><span>{health ? 'OK' : 'Unreachable'}</span></div>
-              <div className="kv"><span>Database</span><span>{up(health && health.db)}</span></div>
-              <div className="kv"><span>Redis cache</span><span>{up(health && health.redis)}</span></div>
-              <div className="kv"><span>Last 15m candle</span><span>{st.last_candle_age_min} min ago</span></div>
-              <div className="kv"><span>Model</span><span>{st.model_version}</span></div>
-              <div className="kv"><span>Next retrain</span><span><Time iso={st.next_retrain} withDate /></span></div>
+            <div className="card kpi-card">
+              <p className="h">30D Win Rate</p>
+              <p className="big font-num text-tp">{fmtPct(s.win_rate_30d)}</p>
+              <p className="sub">{s.closed_30d} closed paper trades</p>
             </div>
-            <div className="card">
-              <h2 className="h">Risk limits</h2>
-              <div className="kv"><span>Daily loss used</span><span>{st.daily_loss_used}% of {st.daily_loss_limit}%</span></div>
-              <div className="kv"><span>Max leverage</span><span>{st.max_leverage}x simulated</span></div>
-              <div className="kv"><span>Correlated open signals</span><span>{st.correlated_open} of {st.correlated_cap}</span></div>
+            <div className="card kpi-card">
+              <p className="h">30D Net P&amp;L</p>
+              <p className={`big font-num ${s.net_pnl_30d >= 0 ? 'text-tp' : 'text-sl'}`}>
+                {fmtPct(s.net_pnl_30d, true)}
+              </p>
+              <p className="sub">after fees, slippage &amp; funding</p>
             </div>
-          </div>
-        </section>
-      </div>
-      <AutoRefresh seconds={30} />
-    </main>
+            <div className="card kpi-card">
+              <p className="h">Max Drawdown</p>
+              <p className="big font-num text-sl">{fmtPct(s.max_drawdown)}</p>
+              <p className="sub">within limit {fmtPct(s.drawdown_limit)}</p>
+            </div>
+          </section>
+
+          {/* Main Grid: Signals Panel (Left) & Risk / Health Panels (Right) */}
+          <section className="grid">
+            <SignalsPanel signals={signals} />
+
+            <div className="side">
+              {/* Paper Equity Curve */}
+              <div className="card side-card">
+                <h2 className="h">Paper Equity Curve (30 Days)</h2>
+                <EquityChart points={equity} />
+              </div>
+
+              {/* Pipeline & Model Health */}
+              <div className="card side-card">
+                <h2 className="h">Pipeline Health &amp; Model</h2>
+                <div className="kv">
+                  <span>FastAPI Service</span>
+                  <span className={health ? 'text-tp' : 'text-sl'}>{health ? 'Online' : 'Unreachable'}</span>
+                </div>
+                <div className="kv">
+                  <span>TimescaleDB (Hypertables)</span>
+                  <span className={health?.db === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.db)}</span>
+                </div>
+                <div className="kv">
+                  <span>Redis Memory Cache</span>
+                  <span className={health?.redis === 'ok' ? 'text-tp' : 'text-sl'}>{up(health?.redis)}</span>
+                </div>
+                <div className="kv">
+                  <span>Collector Latency</span>
+                  <span>{st.last_candle_age_min}m ago</span>
+                </div>
+                <div className="kv">
+                  <span>Active Model</span>
+                  <span className="font-num text-cyan">{st.model_version}</span>
+                </div>
+                <div className="kv">
+                  <span>Next Retrain Run</span>
+                  <span><Time iso={st.next_retrain} withDate /></span>
+                </div>
+              </div>
+
+              {/* Risk Engine & Constraints */}
+              <div className="card side-card">
+                <h2 className="h">Risk Engine Controls</h2>
+                <div className="kv">
+                  <span>Daily Loss Used</span>
+                  <span className="font-num">
+                    {st.daily_loss_used}% of {st.daily_loss_limit}% max
+                  </span>
+                </div>
+                <div className="kv">
+                  <span>Max Simulated Leverage</span>
+                  <span className="font-num text-cyan">{st.max_leverage}x isolated</span>
+                </div>
+                <div className="kv">
+                  <span>Correlated Open Signals</span>
+                  <span className="font-num">
+                    {st.correlated_open} of {st.correlated_cap} cap
+                  </span>
+                </div>
+                <div className="kv">
+                  <span>Market Regime</span>
+                  <span className="regime-tag">{st.market_regime || 'Normal Volatility'}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* Interactive Position Size & Risk Calculator Modal */}
+        <PositionCalculatorModal />
+
+        <AutoRefresh seconds={30} />
+      </main>
     </PrefsProvider>
   );
 }
