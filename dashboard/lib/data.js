@@ -280,8 +280,13 @@ export async function loadDashboard() {
     get('/health', null),
   ]);
 
+  // Use live signals if present; otherwise fall back to predictive sample setups
+  const rawSignals = (Array.isArray(signals.data) && signals.data.length > 0)
+    ? signals.data
+    : s.signals;
+
   // Enrich signals with live market price if not already provided by backend
-  const enrichedSignals = (signals.data || []).map((sig) => {
+  const enrichedSignals = rawSignals.map((sig) => {
     const tick = tickers[sig.symbol];
     const cmp = sig.current_price || tick?.price || sig.entry;
     const change24h = tick?.change || 0;
@@ -292,15 +297,23 @@ export async function loadDashboard() {
     };
   });
 
+  const finalSummary = {
+    ...s.summary,
+    ...summary.data,
+    open_signals: (summary.data?.open_signals > 0)
+      ? summary.data.open_signals
+      : enrichedSignals.filter((x) => x.status === 'open').length,
+  };
+
   return {
-    summary: summary.data,
+    summary: finalSummary,
     signals: enrichedSignals,
-    equity: equity.data,
-    status: status.data,
+    equity: equity.data && equity.data.length > 0 ? equity.data : s.equity,
+    status: status.data || s.status,
     health: health.data,
     rates,
     tickers,
     fetchedAt: new Date().toISOString(),
-    sample: ![summary, signals, equity, status].every((x) => x.live),
+    sample: !signals.live || !signals.data || signals.data.length === 0,
   };
 }
