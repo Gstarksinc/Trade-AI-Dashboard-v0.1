@@ -88,7 +88,7 @@ services:
       COINGECKO_BASE_URL: ${COINGECKO_BASE_URL:-https://api.coingecko.com/api/v3}
       USDT_INR_FALLBACK: ${USDT_INR_FALLBACK:-}
     ports:
-      - '127.0.0.1:3000:3000'
+      - '3000:3000'
     depends_on:
       - api
     profiles: ['full']
