@@ -292,6 +292,19 @@ async function loadRates() {
 
 const TRACKED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'];
 
+const DEFAULT_SUMMARY = {
+  open_signals: 0,
+  symbols_scanned: 8,
+  win_rate_30d: 0.0,
+  closed_30d: 0,
+  net_pnl_30d: 0.0,
+  max_drawdown: 0.0,
+  drawdown_limit: 8.0,
+  profit_factor: 0.0,
+  data_available_days: 45,
+  data_range: '45 Days Available (Binance Futures)',
+};
+
 export async function loadDashboard() {
   const [tickers, rates] = await Promise.all([
     loadBinanceTickers(),
@@ -301,46 +314,32 @@ export async function loadDashboard() {
   const s = sample(tickers);
 
   const [summary, signals, equity, status, health, history] = await Promise.all([
-    get('/summary', s.summary),
-    get('/signals?limit=25', []),
-    get('/equity?days=30', s.equity),
+    get('/summary', DEFAULT_SUMMARY),
+    get('/signals?limit=50', []),
+    get('/equity?days=30', []),
     get('/status', s.status),
     get('/health', null),
     get('/history', []),
   ]);
 
-  // Genuine signals from API only — do not fabricate mock signals as if they were real
-  const apiSignals = Array.isArray(signals.data) ? signals.data : [];
+  // Genuine signals from API only — strictly no mock/sample signals presented as genuine
+  const apiSignals = Array.isArray(signals.data) ? signals.data.filter((sig) => !sig.is_fallback) : [];
 
-  // Enrich confirmed signals with live prices and synchronized bounds
+  // Enrich confirmed genuine signals with latest market prices
   const confirmedSignals = apiSignals.map((sig) => {
     const tick = tickers[sig.symbol];
     const liveCmp = Number(tick?.price);
     const hasLiveCmp = !isNaN(liveCmp) && liveCmp > 0;
     const cmp = hasLiveCmp ? liveCmp : (sig.current_price || sig.entry);
-    
-    let entry = sig.entry;
-    let sl = sig.stop_loss;
-    let tp = sig.take_profit;
-
-    if (hasLiveCmp && entry && Math.abs(entry - liveCmp) / liveCmp > 0.15) {
-      const isLong = String(sig.direction || 'long').toLowerCase() === 'long';
-      const slDist = sig.stop_loss ? Math.abs(sig.entry - sig.stop_loss) / sig.entry : 0.02;
-      const tpDist = sig.take_profit ? Math.abs(sig.take_profit - sig.entry) / sig.entry : 0.04;
-      const prec = liveCmp < 0.1 ? 5 : (liveCmp < 1 ? 4 : (liveCmp < 20 ? 3 : 2));
-      entry = isLong ? Number((liveCmp * 0.996).toFixed(prec)) : Number((liveCmp * 1.004).toFixed(prec));
-      sl = isLong ? Number((entry * (1 - slDist)).toFixed(prec)) : Number((entry * (1 + slDist)).toFixed(prec));
-      tp = isLong ? Number((entry * (1 + tpDist)).toFixed(prec)) : Number((entry * (1 - tpDist)).toFixed(prec));
-    }
 
     const change24h = tick?.change != null ? tick.change : (sig.change_24h || 0);
     return {
       ...sig,
       is_confirmed: true,
       current_price: cmp,
-      entry,
-      stop_loss: sl,
-      take_profit: tp,
+      entry: Number(sig.entry),
+      stop_loss: Number(sig.stop_loss),
+      take_profit: Number(sig.take_profit),
       change_24h: change24h,
     };
   });
@@ -348,7 +347,7 @@ export async function loadDashboard() {
   // Track which monitored symbols have confirmed signals
   const confirmedSymbols = new Set(confirmedSignals.map((sig) => sig.symbol));
 
-  // Monitored coins that do not yet have a confirmed signal show as "Waiting for confirmation"
+  // Monitored coins that do not yet have a confirmed signal show honestly as "Waiting for confirmation"
   const unconfirmedSignals = TRACKED_SYMBOLS
     .filter((sym) => !confirmedSymbols.has(sym))
     .map((sym) => {
@@ -381,13 +380,14 @@ export async function loadDashboard() {
   // Genuine history only — record completed trades only, no dummy/fabricated entries
   const realHistory = Array.isArray(history.data) ? history.data : [];
 
-  const openCount = enrichedSignals.filter((x) => x.is_confirmed && (x.status === 'open' || x.status === 'in_progress')).length;
+  const openCount = confirmedSignals.filter((x) => x.status === 'open' || x.status === 'in_progress').length;
 
   const finalSummary = {
-    ...s.summary,
-    ...summary.data,
+    ...DEFAULT_SUMMARY,
+    ...(summary.data || {}),
     open_signals: openCount,
-    data_available_days: summary.data?.data_available_days || s.summary.data_available_days || 45,
+    symbols_scanned: summary.data?.symbols_scanned || 8,
+    data_available_days: summary.data?.data_available_days || 45,
   };
 
   return {

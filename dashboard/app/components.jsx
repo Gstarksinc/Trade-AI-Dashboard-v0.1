@@ -259,20 +259,62 @@ export function SignalsPanel({
     setHistPage(1);
   }, [tf, search, historySpan]);
 
-  // Real-time tracking of filled entries and session completed trades
+  // Persistent tracking of filled entries and session completed trades
+  const [lifecycleMap, setLifecycleMap] = useState({});
   const [completedTrades, setCompletedTrades] = useState([]);
   const enteredAtRef = useRef({});
   const completedIdsRef = useRef(new Set());
+  const isHydratedRef = useRef(false);
+
+  // Restore persisted lifecycle transitions and completed trades from localStorage
+  useEffect(() => {
+    try {
+      const savedLifecycle = JSON.parse(localStorage.getItem('tradeai_signal_lifecycle_v2') || '{}');
+      const savedTrades = JSON.parse(localStorage.getItem('tradeai_completed_trades_v2') || '[]');
+      setLifecycleMap(savedLifecycle);
+      if (Array.isArray(savedTrades)) {
+        setCompletedTrades(savedTrades);
+        savedTrades.forEach((t) => {
+          if (t.signal_id) completedIdsRef.current.add(String(t.signal_id));
+          if (t.id) completedIdsRef.current.add(String(t.id));
+        });
+      }
+      for (const [id, info] of Object.entries(savedLifecycle)) {
+        if (info.opened_at) enteredAtRef.current[id] = info.opened_at;
+        if (info.status === 'target_hit' || info.status === 'stop_hit' || info.status === 'closed') {
+          completedIdsRef.current.add(String(id));
+        }
+      }
+    } catch {}
+    isHydratedRef.current = true;
+  }, []);
 
   // Defensive array checks
   const signalList = Array.isArray(signals) ? signals : [];
   const baseHistory = Array.isArray(history) ? history : [];
 
-  // Merge history with trades completed during the active session (preserving timestamps)
+  // Merge history with trades completed during the active session (preserving timestamps & deduplicating)
   const historyList = useMemo(() => {
-    const existingIds = new Set(baseHistory.map((h) => h.id));
-    const uniqueSessionTrades = completedTrades.filter((t) => !existingIds.has(t.id));
-    return [...uniqueSessionTrades, ...baseHistory];
+    const existingSignals = new Set();
+    const list = [];
+
+    // Prioritize database history records
+    baseHistory.forEach((h) => {
+      const key = h.signal_id ? `sig-${h.signal_id}` : `trade-${h.id}`;
+      existingSignals.add(key);
+      list.push(h);
+    });
+
+    // Add session completed trades without duplicating
+    completedTrades.forEach((t) => {
+      const key = t.signal_id ? `sig-${t.signal_id}` : `trade-${t.id}`;
+      if (!existingSignals.has(key)) {
+        existingSignals.add(key);
+        list.push(t);
+      }
+    });
+
+    return list;
   }, [baseHistory, completedTrades]);
 
   // Enrich signals with live market price and metrics
@@ -294,28 +336,18 @@ export function SignalsPanel({
         };
       }
 
-      let effectiveEntry = sig?.entry;
-      let effectiveSl = sig?.stop_loss;
-      let effectiveTp = sig?.take_profit;
-
-      // Dynamically resynchronize entry, stop loss, and take profit if signal was from a different price baseline
-      if (livePrice > 0 && effectiveEntry > 0 && Math.abs(effectiveEntry - livePrice) / livePrice > 0.15) {
-        const isLong = String(sig?.direction || 'long').toLowerCase() === 'long';
-        const slDist = (effectiveEntry && effectiveSl) ? Math.abs(effectiveEntry - effectiveSl) / effectiveEntry : 0.02;
-        const tpDist = (effectiveEntry && effectiveTp) ? Math.abs(effectiveTp - effectiveEntry) / effectiveEntry : 0.04;
-        const prec = livePrice < 0.1 ? 5 : (livePrice < 1 ? 4 : (livePrice < 20 ? 3 : 2));
-        
-        effectiveEntry = isLong ? Number((livePrice * 0.996).toFixed(prec)) : Number((livePrice * 1.004).toFixed(prec));
-        effectiveSl = isLong ? Number((effectiveEntry * (1 - slDist)).toFixed(prec)) : Number((effectiveEntry * (1 + slDist)).toFixed(prec));
-        effectiveTp = isLong ? Number((effectiveEntry * (1 + tpDist)).toFixed(prec)) : Number((effectiveEntry * (1 - tpDist)).toFixed(prec));
-      }
+      const savedState = lifecycleMap[sig.id] || {};
+      const statusOverride = savedState.status || sig.status || 'open';
+      const openedAtOverride = savedState.opened_at || sig.opened_at || enteredAtRef.current[sig.id] || null;
 
       const syncedSig = {
         ...sig,
         is_confirmed: true,
-        entry: effectiveEntry,
-        stop_loss: effectiveSl,
-        take_profit: effectiveTp,
+        status: statusOverride,
+        opened_at: openedAtOverride,
+        entry: Number(sig.entry),
+        stop_loss: Number(sig.stop_loss),
+        take_profit: Number(sig.take_profit),
       };
 
       const metrics = calcTradeMetrics(syncedSig, livePrice);
@@ -329,27 +361,48 @@ export function SignalsPanel({
         metrics,
       };
     });
-  }, [signalList, getPrice]);
+  }, [signalList, getPrice, lifecycleMap]);
 
-  // Listen for real-time entries and target / stop-loss completions to record trade history
+  // Listen for real-time entries and target / stop-loss completions to persist lifecycle and record trade history
   useEffect(() => {
     enrichedRows.forEach((row) => {
       if (!row || !row.is_confirmed || !row.id) return;
       const ph = row.metrics?.phase;
       
-      // Track entry filled timestamp
-      if (ph === 'ORDER_IN_PROGRESS' && !row.opened_at && !enteredAtRef.current[row.id]) {
-        enteredAtRef.current[row.id] = new Date().toISOString();
+      // Track entry filled timestamp & persist in_progress state
+      if (ph === 'ORDER_IN_PROGRESS' && !enteredAtRef.current[row.id] && !row.opened_at) {
+        const nowIso = new Date().toISOString();
+        enteredAtRef.current[row.id] = nowIso;
+        setLifecycleMap((prev) => {
+          const next = { ...prev, [row.id]: { ...(prev[row.id] || {}), status: 'in_progress', opened_at: nowIso } };
+          try { localStorage.setItem('tradeai_signal_lifecycle_v2', JSON.stringify(next)); } catch {}
+          return next;
+        });
+
+        // Notify API persistence endpoint
+        fetch('/api/signals/transition', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            signal_id: Number(row.id),
+            status: 'in_progress',
+            opened_at: nowIso,
+            symbol: row.symbol,
+            direction: row.direction,
+            entry: row.entry,
+          }),
+        }).catch(() => {});
       }
 
-      // Record completed trade only when target or stop loss is reached
-      if ((ph === 'WIN_TARGET_HIT' || ph === 'LOSS_STOP_HIT') && !completedIdsRef.current.has(row.id)) {
-        completedIdsRef.current.add(row.id);
+      // Record completed trade only when target or stop loss is reached, avoiding duplicates
+      if ((ph === 'WIN_TARGET_HIT' || ph === 'LOSS_STOP_HIT') && !completedIdsRef.current.has(String(row.id))) {
+        completedIdsRef.current.add(String(row.id));
         const isWin = ph === 'WIN_TARGET_HIT';
         const nowIso = new Date().toISOString();
         const openedAt = row.opened_at || enteredAtRef.current[row.id] || row.created_at || null;
         const newTrade = {
-          id: `session-trade-${row.id}-${Date.now()}`,
+          id: `trade-${row.id}-${Date.now()}`,
+          signal_id: row.id,
           symbol: row.symbol,
           timeframe: row.timeframe || '1h',
           direction: row.direction,
@@ -362,7 +415,46 @@ export function SignalsPanel({
           closed_at: nowIso,
           target_hit_at: isWin ? nowIso : null,
         };
-        setCompletedTrades((prev) => [newTrade, ...prev]);
+
+        setCompletedTrades((prev) => {
+          const next = [newTrade, ...prev.filter((t) => String(t.signal_id) !== String(row.id))];
+          try { localStorage.setItem('tradeai_completed_trades_v2', JSON.stringify(next)); } catch {}
+          return next;
+        });
+
+        setLifecycleMap((prev) => {
+          const next = {
+            ...prev,
+            [row.id]: {
+              status: isWin ? 'target_hit' : 'stop_hit',
+              opened_at: openedAt,
+              closed_at: nowIso,
+              exit_price: newTrade.exit_price,
+              pnl_pct: newTrade.pnl_pct,
+              exit_reason: newTrade.exit_reason,
+            },
+          };
+          try { localStorage.setItem('tradeai_signal_lifecycle_v2', JSON.stringify(next)); } catch {}
+          return next;
+        });
+
+        // Persist completed trade to backend API
+        fetch('/api/signals/transition', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            signal_id: Number(row.id),
+            status: isWin ? 'target_hit' : 'stop_hit',
+            opened_at: openedAt,
+            closed_at: nowIso,
+            exit_price: newTrade.exit_price,
+            pnl_pct: newTrade.pnl_pct,
+            exit_reason: newTrade.exit_reason,
+            symbol: row.symbol,
+            direction: row.direction,
+            entry: row.entry,
+          }),
+        }).catch(() => {});
       }
     });
   }, [enrichedRows]);
@@ -527,6 +619,17 @@ export function SignalsPanel({
           </div>
         )}
       </div>
+
+      {/* Informative notice when all coins are currently waiting for confirmation */}
+      {activeTab === 'signals' && !enrichedRows.some((r) => r.is_confirmed) && (
+        <div className="status-notice-banner">
+          <span className="notice-icon">📡</span>
+          <div className="notice-text">
+            <strong>Active Market Scanning — Waiting for Confirmation</strong>
+            <p>All monitored perpetuals are streaming live Binance Futures prices. Quantitative breakouts are continuously evaluated (LightGBM ≥ 55% + Meta-Filter). Tracked coins will advance to &ldquo;Waiting for entry&rdquo; as soon as confirmed setups trigger.</p>
+          </div>
+        </div>
+      )}
 
       {/* Main Tab Content */}
       {activeTab === 'signals' ? (

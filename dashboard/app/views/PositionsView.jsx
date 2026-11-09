@@ -333,3 +333,4 @@ export function PositionsView({ signals = [], onSelectChartSymbol, onSimulateClo
     </div>
   );
 }
+

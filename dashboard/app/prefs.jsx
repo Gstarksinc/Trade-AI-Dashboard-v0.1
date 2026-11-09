@@ -27,9 +27,9 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
   const [isSessionRunning, setIsSessionRunning] = useState(true);
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [sessionStats, setSessionStats] = useState({
-    winRate: 58.4,
-    closedTrades: 142,
-    netPnl: 8.4,
+    winRate: 0.0,
+    closedTrades: 0,
+    netPnl: 0.0,
     isReset: false,
   });
 

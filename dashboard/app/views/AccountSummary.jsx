@@ -21,8 +21,8 @@ export function AccountSummaryCard({ positions = [], equity = [] }) {
     return acc + posPnl;
   }, 0);
 
-  // Latest equity ratio from equity points or default +8.4%
-  const latestRatio = equity.length > 0 ? (equity[equity.length - 1]?.equity || 108.4) / 100 : 1.084;
+  // Latest equity ratio from equity points or default 100.0%
+  const latestRatio = equity.length > 0 ? (equity[equity.length - 1]?.equity || 100.0) / 100 : 1.0;
   const totalEquity = Number((baseCapital * latestRatio + unrealizedPnlUsdt).toFixed(2));
   
   // Used margin (simulated $500 per open position)
@@ -32,7 +32,7 @@ export function AccountSummaryCard({ positions = [], equity = [] }) {
   // Cumulative realized & total P&L
   const totalPnlUsdt = totalEquity - baseCapital;
   const totalPnlPct = (totalPnlUsdt / baseCapital) * 100;
-  const dailyPnlUsdt = 142.50 + unrealizedPnlUsdt * 0.4;
+  const dailyPnlUsdt = unrealizedPnlUsdt;
   const dailyPnlPct = (dailyPnlUsdt / baseCapital) * 100;
 
   return (
@@ -115,3 +115,4 @@ export function AccountSummaryCard({ positions = [], equity = [] }) {
     </div>
   );
 }
+

@@ -377,3 +377,4 @@ export function MarketsView({ tickers = {}, signals = [], onSelectChartSymbol, o
     </div>
   );
 }
+

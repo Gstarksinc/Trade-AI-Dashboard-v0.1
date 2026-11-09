@@ -568,3 +568,4 @@ export function CandlestickChartView({
     </div>
   );
 }
+

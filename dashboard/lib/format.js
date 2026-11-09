@@ -152,53 +152,79 @@ export function calcTradeMetrics(signal, currentPrice) {
   let isTriggered = false;
 
   const statusStr = String(signal.status || 'open').toLowerCase();
+  const hasEntered = Boolean(signal.opened_at || signal.is_in_progress || statusStr === 'in_progress');
+
   if (statusStr === 'target_hit' || statusStr === 'win') {
     phase = 'WIN_TARGET_HIT';
     phaseLabel = 'Win — Target hit';
     isTriggered = true;
-  } else if (statusStr === 'stopped' || statusStr === 'stop_loss' || statusStr === 'loss') {
+  } else if (statusStr === 'stopped' || statusStr === 'stop_hit' || statusStr === 'stop_loss' || statusStr === 'loss') {
     phase = 'LOSS_STOP_HIT';
     phaseLabel = 'Loss — Stop loss hit';
     isTriggered = true;
   } else {
-    // Dynamic market status evaluation based on live CMP
-    if (isLong) {
-      if (cmp >= tp) {
-        phase = 'WIN_TARGET_HIT';
-        phaseLabel = 'Win — Target hit';
-        isTriggered = true;
-      } else if (cmp <= sl) {
-        phase = 'LOSS_STOP_HIT';
-        phaseLabel = 'Loss — Stop loss hit';
-        isTriggered = true;
-      } else if (cmp <= entry || signal.status === 'in_progress' || signal.opened_at) {
-        // Entry reached (limit buy triggered)
-        phase = 'ORDER_IN_PROGRESS';
-        phaseLabel = 'Order in progress';
-        isTriggered = true;
+    // Check ambiguous level collision: if CMP breaches both TP and SL simultaneously, preserve position state without guessing
+    const isAmbiguous = isLong ? (cmp >= tp && cmp <= sl) : (cmp <= tp && cmp >= sl);
+
+    if (isAmbiguous) {
+      phase = hasEntered ? 'ORDER_IN_PROGRESS' : 'WAITING_ENTRY';
+      phaseLabel = hasEntered ? 'Order in progress' : 'Waiting for entry';
+      isTriggered = hasEntered;
+    } else if (hasEntered) {
+      // Order is actively in progress: evaluate TP and SL
+      if (isLong) {
+        if (cmp >= tp) {
+          phase = 'WIN_TARGET_HIT';
+          phaseLabel = 'Win — Target hit';
+          isTriggered = true;
+        } else if (cmp <= sl) {
+          phase = 'LOSS_STOP_HIT';
+          phaseLabel = 'Loss — Stop loss hit';
+          isTriggered = true;
+        } else {
+          phase = 'ORDER_IN_PROGRESS';
+          phaseLabel = 'Order in progress';
+          isTriggered = true;
+        }
       } else {
-        phase = 'WAITING_ENTRY';
-        phaseLabel = 'Waiting for entry';
-        isTriggered = false;
+        if (cmp <= tp) {
+          phase = 'WIN_TARGET_HIT';
+          phaseLabel = 'Win — Target hit';
+          isTriggered = true;
+        } else if (cmp >= sl) {
+          phase = 'LOSS_STOP_HIT';
+          phaseLabel = 'Loss — Stop loss hit';
+          isTriggered = true;
+        } else {
+          phase = 'ORDER_IN_PROGRESS';
+          phaseLabel = 'Order in progress';
+          isTriggered = true;
+        }
       }
     } else {
-      if (cmp <= tp) {
-        phase = 'WIN_TARGET_HIT';
-        phaseLabel = 'Win — Target hit';
-        isTriggered = true;
-      } else if (cmp >= sl) {
-        phase = 'LOSS_STOP_HIT';
-        phaseLabel = 'Loss — Stop loss hit';
-        isTriggered = true;
-      } else if (cmp >= entry || signal.status === 'in_progress' || signal.opened_at) {
-        // Entry reached (limit sell triggered)
-        phase = 'ORDER_IN_PROGRESS';
-        phaseLabel = 'Order in progress';
-        isTriggered = true;
+      // Waiting for entry: check if entry price was reached
+      if (isLong) {
+        if (cmp <= entry) {
+          // Entry reached: limit buy filled
+          phase = 'ORDER_IN_PROGRESS';
+          phaseLabel = 'Order in progress';
+          isTriggered = true;
+        } else {
+          phase = 'WAITING_ENTRY';
+          phaseLabel = 'Waiting for entry';
+          isTriggered = false;
+        }
       } else {
-        phase = 'WAITING_ENTRY';
-        phaseLabel = 'Waiting for entry';
-        isTriggered = false;
+        if (cmp >= entry) {
+          // Entry reached: limit sell filled
+          phase = 'ORDER_IN_PROGRESS';
+          phaseLabel = 'Order in progress';
+          isTriggered = true;
+        } else {
+          phase = 'WAITING_ENTRY';
+          phaseLabel = 'Waiting for entry';
+          isTriggered = false;
+        }
       }
     }
   }

@@ -79,26 +79,26 @@ export function OverviewView({
         {/* Active Signals */}
         <div className="card kpi-card">
           <p className="h">Active Confirmed Signals</p>
-          <p className="big font-num text-cyan">{s?.open_signals || confirmedSignals.length}</p>
+          <p className="big font-num text-cyan">{s?.open_signals ?? confirmedSignals.length}</p>
           <p className="sub">
-            of {s?.symbols_scanned || 8} monitored perpetuals (awaiting entry or filled)
+            of {s?.symbols_scanned ?? 8} monitored perpetuals (awaiting entry or filled)
           </p>
         </div>
 
         {/* 30-Day Win Rate */}
         <div className="card kpi-card">
           <p className="h">30-Day Win Rate (Paper)</p>
-          <p className="big font-num text-tp">{fmtPct(s?.win_rate_30d)}</p>
+          <p className="big font-num text-tp">{(s?.closed_30d ?? 0) > 0 ? fmtPct(s?.win_rate_30d) : '0.0%'}</p>
           <p className="sub">
-            {s?.closed_30d || 142} closed paper trades (Past 30 Days)
+            {s?.closed_30d ?? 0} closed paper trades (Past 30 Days)
           </p>
         </div>
 
         {/* 30-Day Net P&L */}
         <div className="card kpi-card">
           <p className="h">30-Day Net Return (Simulated)</p>
-          <p className={`big font-num ${(s?.net_pnl_30d || 0) >= 0 ? 'text-tp' : 'text-sl'}`}>
-            {fmtPct(s?.net_pnl_30d, true)}
+          <p className={`big font-num ${(s?.net_pnl_30d ?? 0) >= 0 ? 'text-tp' : 'text-sl'}`}>
+            {fmtPct(s?.net_pnl_30d ?? 0.0, true)}
           </p>
           <p className="sub">
             after 0.04% taker fee, 0.02% slippage &amp; funding
@@ -108,7 +108,7 @@ export function OverviewView({
         {/* Max Drawdown */}
         <div className="card kpi-card">
           <p className="h">Max Drawdown (30D)</p>
-          <p className="big font-num text-sl">{fmtPct(s?.max_drawdown)}</p>
+          <p className="big font-num text-sl">{fmtPct(s?.max_drawdown ?? 0.0)}</p>
           <p className="sub">
             within risk limit of {fmtPct(s?.drawdown_limit || 8.0)}
           </p>
@@ -250,3 +250,4 @@ export function OverviewView({
     </div>
   );
 }
+
