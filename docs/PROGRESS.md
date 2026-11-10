@@ -16,7 +16,7 @@
 | **4** | Holdout window specification | **NOT STARTED** | Strictly 20% most recent bars after 200-bar warmup and embargo. | Item 4 |
 | **5** | Re-audit full history | **NOT STARTED** | Label shuffle, 1-bar lag, 2x cost stress, DSR with true trials. | Item 5 |
 | **6** | Funding history & Binance onboarding audit | **DONE** | Backfilled 6,420 funding records per symbol (6,495 for SOL) from 2021-01-01 to present with `startTime` pagination; audited all 8 symbols against `onboardDate` via Binance exchangeInfo (all onboarded 2019-2020); verified 0 zero-volume bars and 0 flat bars across 51,352 (1h) and 12,838 (4h) candles; fixed labeling funding accrual to scale by timeframe (8 bars/8h for 1h, 2 bars/8h for 4h) with 1 bp/8h fallback for unprovided/flat funding. | Completed |
-| **7** | Reconcile test count (40 vs 41) | **NOT STARTED** | Investigate and account for all tests. | Item 7 |
+| **7** | Reconcile test count (40 vs 41) | **DONE** | Exact audit: 40 service unit/integration tests across 9 microservices + 1 E2E pipeline integration test (`test_e2e_pipeline.py`) = 41 total production CI tests. Explained the earlier off-by-one arithmetic slip where the heading said 40 while the itemized list actually contained 41 tests (1+5+5+3+1+3+8+6+8+1 = 41). Root legacy unit tests (21 tests) accounted for separately. | Completed |
 
 ---
 
@@ -36,7 +36,7 @@
 
 ---
 
-## Complete Test Suite Reconciliation (40 Tests Total)
+## Complete Test Suite Reconciliation (41 Tests Total)
 
 1. **`market-collector` (5 tests)**:
    - `test_rate_limit_budgeter`
@@ -90,4 +90,4 @@
 10. **End-to-End Pipeline Fixture (1 test)**:
     - `test_e2e_signal_to_execution_flow`
 
-**Grand Total**: 40 unit and integration tests passing across all services.
+**Grand Total**: 41 production unit and integration tests passing across all services (40 service tests + 1 E2E pipeline test). Separately, 21 standalone prototype unit tests exist in root `tests/`.
