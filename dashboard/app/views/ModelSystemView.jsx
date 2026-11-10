@@ -7,10 +7,10 @@ const TIMEFRAMES = ['15m', '1h', '4h'];
 
 /**
  * Dedicated Model & System View
- * Displays model architecture, confidence gating, ingestion freshness, 10-service health grid,
- * per-symbol/timeframe model status matrix (champion/shadow/disabled), and risk limits.
+ * Displays model architecture, confidence gating, ingestion freshness, microservices health grid,
+ * per-symbol/timeframe model status matrix, and risk limits.
  */
-export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, fresh = true }) {
+export function ModelSystemView({ status: st = {}, health = {}, dataDays = 1095, fresh = true }) {
   const modelMatrix = st?.model_matrix || {};
   const hasActiveChampion = Boolean(st?.has_active_champion);
 
@@ -98,15 +98,15 @@ export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, f
     <div className="model-system-container">
       {/* Honest Model Status Banner */}
       {!hasActiveChampion && (
-        <div className="card" style={{ borderLeft: '4px solid #a855f7', background: 'rgba(168, 85, 247, 0.08)', marginBottom: '1.5rem' }}>
+        <div className="card" style={{ borderLeft: '4px solid #f59e0b', background: 'rgba(245, 158, 11, 0.08)', marginBottom: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.25rem' }}>🛡️</span>
+            <span style={{ fontSize: '1.25rem' }}>⚠️</span>
             <div>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Institutional Validation Gate: No Active Champion Model
+              <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Institutional Gate: No Validated Model (Zero Champion &amp; Zero Challenger Promotions)
               </h3>
               <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-secondary, #94a3b8)' }}>
-                Zero models have been promoted to champion. All candidate models are enrolled strictly in <strong>Challenger Shadow Mode</strong> (paper observation only) for a mandatory 30–60 day forward testing window. Live trading signal execution is disengaged.
+                Empirical leakage audit and Phase 3.1 evaluation across 5+ years of historical data resulted in zero models passing all promotion gates (Deflated Sharpe Ratio, holdout trade counts, and 2x cost-stress resilience). No models are promoted to champion or challenger. Live signal execution is completely disengaged.
               </p>
             </div>
           </div>
@@ -123,7 +123,7 @@ export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, f
         </div>
         <h2 className="card-title">Model Status Matrix</h2>
         <p className="sub">
-          Explicit operational status for each supported perpetual asset and timeframe. Green = Active Champion, Purple = Shadow Challenger, Gray = Disabled.
+          Explicit operational status for each supported perpetual asset and timeframe. Green = Active Champion, Purple = Shadow Challenger, Amber/Gray = No Validated Model / Disabled.
         </p>
 
         <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
@@ -139,49 +139,62 @@ export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, f
             </thead>
             <tbody>
               {SYMBOLS.map((sym) => {
-                const isShadowEligible = sym === 'BTCUSDT' || sym === 'ETHUSDT';
+                const matrix = modelMatrix?.[sym] || {};
+                const m15 = matrix['15m'] || { status: 'disabled', label: 'DISABLED' };
+                const m1h = matrix['1h'] || { status: 'no_validated_model', label: 'NO VALIDATED MODEL' };
+                const m4h = matrix['4h'] || { status: 'no_validated_model', label: 'NO VALIDATED MODEL' };
+
+                const renderBadge = (m) => {
+                  if (m.status === 'champion') {
+                    return (
+                      <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', border: '1px solid #22c55e', fontWeight: 600 }}>
+                        CHAMPION
+                      </span>
+                    );
+                  }
+                  if (m.status === 'shadow' || m.status === 'challenger') {
+                    return (
+                      <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid #a855f7', fontWeight: 600 }}>
+                        SHADOW
+                      </span>
+                    );
+                  }
+                  if (m.status === 'no_validated_model') {
+                    return (
+                      <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)', fontWeight: 600 }}>
+                        NO VALIDATED MODEL
+                      </span>
+                    );
+                  }
+                  return (
+                    <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: '#334155', color: '#94a3b8', fontWeight: 600 }}>
+                      DISABLED
+                    </span>
+                  );
+                };
+
                 return (
                   <tr key={sym} style={{ borderBottom: '1px solid var(--border-color, #1e293b)' }}>
                     <td style={{ padding: '0.75rem 1rem', fontWeight: 'bold' }}>{sym}</td>
                     
                     {/* 15m */}
                     <td style={{ padding: '0.75rem 1rem' }}>
-                      <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: '#334155', color: '#94a3b8', fontWeight: 600 }}>
-                        DISABLED
-                      </span>
+                      {renderBadge(m15)}
                     </td>
 
                     {/* 1h */}
                     <td style={{ padding: '0.75rem 1rem' }}>
-                      {isShadowEligible ? (
-                        <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid #a855f7', fontWeight: 600 }}>
-                          SHADOW (CHALLENGER)
-                        </span>
-                      ) : (
-                        <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: '#334155', color: '#94a3b8', fontWeight: 600 }}>
-                          DISABLED
-                        </span>
-                      )}
+                      {renderBadge(m1h)}
                     </td>
 
                     {/* 4h */}
                     <td style={{ padding: '0.75rem 1rem' }}>
-                      {isShadowEligible ? (
-                        <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid #a855f7', fontWeight: 600 }}>
-                          SHADOW (CHALLENGER)
-                        </span>
-                      ) : (
-                        <span style={{ display: 'inline-block', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', background: '#334155', color: '#94a3b8', fontWeight: 600 }}>
-                          DISABLED
-                        </span>
-                      )}
+                      {renderBadge(m4h)}
                     </td>
 
                     {/* Details */}
-                    <td style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontSize: '0.8rem' }}>
-                      {isShadowEligible
-                        ? 'Passed leakage audit & cost-to-risk gate; in 30–60d shadow evaluation.'
-                        : '15m suppressed by cost gate; 1h/4h awaiting forward paper calibration.'}
+                    <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary, #94a3b8)', fontSize: '0.8rem' }}>
+                      Failed empirical promotion gates; strictly no live signal emission.
                     </td>
                   </tr>
                 );
@@ -191,55 +204,48 @@ export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, f
         </div>
       </div>
 
-      {/* Model Architecture & Gating Card */}
-      <div className="card model-card">
-        <div className="account-badge-row">
-          <span className="account-env-badge">
-            <span className="sim-dot" /> MACHINE LEARNING PIPELINE
-          </span>
-          <span className="sim-disclaimer-pill">LIGHTGBM + META-LABELING RANDOM FOREST</span>
-        </div>
-        <h2 className="card-title">Model Specifications &amp; Confidence Gating</h2>
-        <p className="sub">Two-stage quantitative pipeline ensuring only high-conviction directional setups reach the execution engine.</p>
+      {/* Two-Stage Model Architecture Specification */}
+      <div className="card model-details-card" style={{ marginBottom: '1.5rem' }}>
+        <h2 className="card-title">Two-Stage Quantitative Architecture</h2>
+        <p className="sub">
+          Separation of primary direction forecasting from execution sizing and meta-label filtering
+        </p>
 
-        <div className="model-stages-grid">
-          {/* Primary Model */}
-          <div className="model-stage-box">
-            <div className="stage-header">
-              <span className="stage-num">STAGE 1</span>
-              <h3 className="stage-title">Primary Predictor (LightGBM)</h3>
-            </div>
+        <div className="pipeline-grid" style={{ marginTop: '1.25rem' }}>
+          {/* Stage 1: Primary Direction */}
+          <div className="pipeline-stage-card">
+            <div className="stage-badge primary">STAGE 1: PRIMARY DIRECTION</div>
+            <h3 className="stage-name">Calibrated LightGBM Classifier</h3>
             <p className="stage-desc">
-              LightGBM Gradient Boosted Trees regressor evaluating 1h and 4h price dynamics, moving averages, RSI, and ATR bands.
+              Generates unhedged directional probabilities from point-in-time technical and orderflow features.
+              Output is calibrated via Platt scaling (Sigmoid) or Isotonic regression with Purged Cross-Validation.
             </p>
             <div className="stage-specs">
               <div className="spec-row">
-                <span>Model Version:</span>
-                <strong className="font-num text-cyan">{st?.model_version || 'LGBM-V31-CHALLENGER'}</strong>
+                <span>Objective:</span>
+                <strong className="font-num text-tp">Binary Logloss (Calibrated)</strong>
               </div>
               <div className="spec-row">
-                <span>Threshold:</span>
-                <strong className="font-num">Probability &gt;= 55%</strong>
+                <span>Base Threshold:</span>
+                <strong className="font-num text-tp">Calibrated P &gt;= 55%</strong>
               </div>
               <div className="spec-row">
-                <span>Calibration:</span>
-                <span>Platt Scaling (CalibratedClassifierCV)</span>
+                <span>Features Used:</span>
+                <span>TA-Lib, Volatility, Cycle, Momentum</span>
               </div>
               <div className="spec-row">
-                <span>Retrain Frequency:</span>
-                <span>Weekly with Purged Embargoed CV</span>
+                <span>Sample Weights:</span>
+                <span className="text-tp font-bold">Sample-Uniqueness Weighted</span>
               </div>
             </div>
           </div>
 
-          {/* Meta-Labeling Gate */}
-          <div className="model-stage-box">
-            <div className="stage-header">
-              <span className="stage-num">STAGE 2</span>
-              <h3 className="stage-title">Meta-Labeling Gate (Random Forest)</h3>
-            </div>
+          {/* Stage 2: Meta-Labeling Filter */}
+          <div className="pipeline-stage-card">
+            <div className="stage-badge secondary">STAGE 2: SIZING &amp; CONFIRMATION</div>
+            <h3 className="stage-name">Meta-Labeling Ensemble Filter</h3>
             <p className="stage-desc">
-              Meta-classifier (Marcos López de Prado method) filtering trades based on whether the primary setup will reach Take Profit before Stop Loss.
+              Secondary model (Marcos López de Prado method) filtering trades based on whether the primary setup will reach Take Profit before Stop Loss.
             </p>
             <div className="stage-specs">
               <div className="spec-row">
@@ -265,7 +271,7 @@ export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, f
 
       {/* Services Health Grid */}
       <div className="card services-card">
-        <h2 className="card-title">Event-Driven Microservices Health (10 Services)</h2>
+        <h2 className="card-title">Event-Driven Microservices Health (9 Microservices + 2 Storage)</h2>
         <p className="sub">Real-time status of all containerized background microservices and storage tiers</p>
 
         <div className="services-grid">
@@ -296,7 +302,7 @@ export function ModelSystemView({ status: st = {}, health = {}, dataDays = 45, f
           <h3 className="h">Data Pipeline &amp; Ingestion</h3>
           <div className="kv">
             <span>Historical Data Available</span>
-            <span className="font-num text-tp">{dataDays} Days</span>
+            <span className="font-num text-tp">{dataDays} Days (5.9 Years)</span>
           </div>
           <div className="kv">
             <span>Primary Market Source</span>

@@ -26,7 +26,7 @@ const DEFAULT_TICKERS = {
 // Default system status when initializing
 const DEFAULT_STATUS = {
   last_candle_age_min: 1,
-  model_version: 'LGBM-V31 (Challenger Shadow Run Only)',
+  model_version: 'No validated model',
   next_retrain: nextSunday0200(),
   daily_loss_used: 0.0,
   daily_loss_limit: 3.0,
@@ -34,9 +34,10 @@ const DEFAULT_STATUS = {
   correlated_open: 0,
   correlated_cap: 2,
   market_regime: 'Normal Volatility',
-  data_available_days: 45,
+  data_available_days: 1095,
   has_active_champion: false,
-  champion_status_notice: 'No active champion model. System is in Shadow Paper Observation mode only.',
+  has_active_challenger: false,
+  champion_status_notice: 'No validated model. Zero models promoted to champion or challenger.',
 };
 
 async function get(path, fallback) {

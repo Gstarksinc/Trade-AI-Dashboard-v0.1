@@ -94,28 +94,39 @@ async def get_system_status():
         registered = {}
 
     has_active_champion = any(m["stage"] == "champion" for m in registered.values())
+    has_active_challenger = any(m["stage"] in ("challenger", "shadow") for m in registered.values())
 
-    # 2. Build status per symbol & timeframe matrix
+    # 2. Build status per symbol & timeframe matrix strictly from model_registry
     matrix = {}
     for sym in SYMBOLS:
         matrix[sym] = {}
         for tf in TIMEFRAMES:
+            # Check if a model genuinely exists in the registry for this sym/tf
+            matching_models = [
+                (ver, data) for ver, data in registered.items()
+                if sym in ver and tf in ver
+            ]
             if tf == "15m":
                 matrix[sym][tf] = {
                     "status": "disabled",
+                    "label": "Disabled",
                     "reason": "15m timeframe disabled by risk policy (low cost-to-risk ratio)",
                     "active_model": None,
                 }
-            elif sym in ("BTCUSDT", "ETHUSDT"):
+            elif matching_models:
+                ver, data = matching_models[0]
+                stage = data["stage"]
                 matrix[sym][tf] = {
-                    "status": "shadow",
-                    "reason": "Challenger shadow observation mode (30-60 day paper trial active)",
-                    "active_model": f"LGBM-V31-{sym}-{tf}-CHALLENGER",
+                    "status": stage,
+                    "label": stage.capitalize(),
+                    "reason": f"Enrolled in registry as {stage}",
+                    "active_model": ver,
                 }
             else:
                 matrix[sym][tf] = {
-                    "status": "disabled",
-                    "reason": "No approved model in registry",
+                    "status": "no_validated_model",
+                    "label": "No validated model",
+                    "reason": "Promotion gates failed on historical empirical audit; zero models validated.",
                     "active_model": None,
                 }
 
@@ -129,10 +140,17 @@ async def get_system_status():
     except Exception:
         pass
 
+    notice = (
+        "Active champion running."
+        if has_active_champion
+        else "No validated model. Zero models promoted to champion or challenger."
+    )
+
     return {
         "market_feed_status": "live" if collector_alive else "degraded",
         "has_active_champion": has_active_champion,
-        "champion_status_notice": "No active champion model. System is in Shadow Paper Observation mode only." if not has_active_champion else "Active champion running.",
+        "has_active_challenger": has_active_challenger,
+        "champion_status_notice": notice,
         "model_matrix": matrix,
     }
 
