@@ -1,0 +1,47 @@
+groups:
+  - name: signals_pipeline_alerts
+    rules:
+      - alert: MarketDataStale
+        expr: signals_last_candle_age_seconds > 180
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Market candle data stale on {{ $labels.symbol }} ({{ $labels.timeframe }})"
+          description: "Latest candle is older than 3 minutes ({{ $value }}s)."
+
+      - alert: IngestionLagHigh
+        expr: signals_ingestion_lag_seconds > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High ingestion lag on {{ $labels.symbol }}"
+          description: "Ingestion lag is {{ $value }}s."
+
+      - alert: StreamConsumerLagHigh
+        expr: signals_stream_consumer_lag > 500
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer group {{ $labels.group }} falling behind"
+          description: "Stream consumer lag is {{ $value }} pending messages."
+
+      - alert: DLQMessagesPresent
+        expr: signals_redis_dlq_size > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead Letter Queue non-empty on stream {{ $labels.stream }}"
+          description: "DLQ contains {{ $value }} unhandled failed messages."
+
+      - alert: ApiLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(signals_api_latency_seconds_bucket[5m])) by (le)) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API Gateway P95 latency exceeds 500ms"
+          description: "Current P95 latency is {{ $value }}s."
