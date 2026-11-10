@@ -8,7 +8,7 @@ An institutional-grade, event-driven cryptocurrency algorithmic research platfor
 
 ## Technical Stack & Architecture
 
-- **Microservices**: 10 containerized services under `services/` (each with dedicated `Dockerfile`, `requirements.txt`, health checks, and unit tests).
+- **Microservices**: 9 containerized event-driven Python 3.11 FastAPI microservices under `services/` (each with dedicated `Dockerfile`, `requirements.txt`, health checks, and unit tests) + 1 Next.js 14 Web Dashboard.
 - **Event Bus & Messaging**: Redis 7 Streams with consumer groups (`XREADGROUP`, auto-ack, retry, and Dead-Letter Queue `system.dlq`).
 - **Database**: PostgreSQL 16 with TimescaleDB hypertables, domain schemas (`market_data`, `feature_store`, `model_registry`, `signals_ledger`, `paper_execution`, `outbox`), and single Alembic migrations runner.
 - **Machine Learning**: LightGBM (Platt calibrated) + Random Forest Meta-Classifier with Purged Combinatorial CV (CPCV), Deflated Sharpe Ratio (DSR), Probability of Backtest Overfitting (PBO), and strict promotion gates.
