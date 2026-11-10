@@ -72,8 +72,8 @@ async def run_batch_evaluation(symbols: List[str] = None, timeframes: List[str] 
         for tf in timeframes:
             log.info("Processing training & evaluation for %s %s...", symbol, tf)
             try:
-                # 1. Try loading from database first
-                candles, _ = await trainer.load_training_data(symbol, tf, limit=2000)
+                # 1. Load complete history from TimescaleDB
+                candles, _ = await trainer.load_training_data(symbol, tf, limit=None)
                 
                 # 2. If cold DB, pull directly from public Binance REST
                 if len(candles) < 300:
@@ -140,6 +140,17 @@ async def run_batch_evaluation(symbols: List[str] = None, timeframes: List[str] 
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_batch_evaluation())
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    out = asyncio.run(run_batch_evaluation(symbols=["BTCUSDT", "ETHUSDT"], timeframes=["1h", "4h"]))
+    print("\n" + "=" * 80)
+    print("PHASE 3.1 BATCH RUNNER RESULTS (BTC & ETH 1h/4h ON FULL HISTORY)")
+    print("=" * 80)
+    for r in out["results"]:
+        print(f"\nModel: {r['symbol']} ({r['timeframe']}) - {r['version']}")
+        print(f"  Total Bars: {r['total_bars']}, Fill Rate: {r['fill_rate']}, Gate Pass Rate: {r['gate_pass_rate']}")
+        print(f"  Holdout Trades: {r['holdout_trades']}, Net EV: {r['holdout_net_ev_pct']}%, 95% CI: {r['bootstrap_ci_95']}%")
+        print(f"  Holdout Sharpe: {r['holdout_sharpe']}, Median CPCV Sharpe: {r['median_cpcv_sharpe']}")
+        print(f"  ECE: {r['ece']}, DSR: {r['dsr']}, PBO: {r['pbo']}")
+        print(f"  Promotion Approved: {r['promotion_approved']}")
+        print(f"  Gates Breakdown: {r['gates_breakdown']}")
 

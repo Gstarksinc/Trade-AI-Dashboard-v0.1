@@ -65,15 +65,22 @@ class ModelTrainer:
         self.artifacts_dir = artifacts_dir
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    async def load_training_data(self, symbol: str = "BTCUSDT", timeframe: str = "15m", limit: int = 4000) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        query = text("""
+    async def load_training_data(self, symbol: str = "BTCUSDT", timeframe: str = "15m", limit: Optional[int] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        base_query = """
             SELECT open_time, open, high, low, close, volume, taker_buy_base
             FROM market_data.candles
             WHERE symbol = :symbol AND timeframe = :timeframe AND is_closed = TRUE
-            ORDER BY open_time ASC LIMIT :limit;
-        """)
+            ORDER BY open_time ASC
+        """
+        params = {"symbol": symbol, "timeframe": timeframe}
+        if limit is not None:
+            base_query += " LIMIT :limit;"
+            params["limit"] = limit
+        else:
+            base_query += ";"
+        query = text(base_query)
         async with engine.connect() as conn:
-            result = await conn.execute(query, {"symbol": symbol, "timeframe": timeframe, "limit": limit})
+            result = await conn.execute(query, params)
             rows = result.fetchall()
             if not rows:
                 return pd.DataFrame(), pd.DataFrame()
