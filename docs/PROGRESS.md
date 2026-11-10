@@ -1,7 +1,22 @@
-# Phase 6.5 - Data and Audit Repair Progress Tracker
+# Phase 6.5 & Phase 6.6 - Progress Tracker
 
 **Scope**: Crypto futures paper trading & research only. Strictly no exchange private keys, no real order execution.
 **Champion & Challenger Policy**: Zero models promoted to champion. Zero models promoted to challenger. Dashboard and API gateway honestly display "No validated model".
+
+---
+
+## Phase 6.6 Execution Matrix (Evaluation Reconciliation)
+
+| Item | Task Description | Status | Verification Evidence / Command Output Summary | Next Step |
+| :--- | :--- | :---: | :--- | :--- |
+| **0** | Clean up jobs, backup DB, remove seeded test rows, scratch DB setup | **DONE** | Removed exited container `signals-migrator-1`; created `backups/signals_20261110_165241.dump`; queried & showed 1 row in `models`, 3 in `signals`, 2 in `paper_trades`, 2 in `outbox`; deleted only those test rows; created `trade_ai_scratch` database for isolated restore testing. | Proceed to Item 1 |
+| **1** | Unified evaluation function & threshold config | **NOT STARTED** | Reconcile threshold discrepancy (0.52/0.50 vs 0.55/0.60) and trade counts between funnel & batch runner. | Item 1 |
+| **2** | Detailed reporting & Sharpe audit for BTC/ETH 1h/4h | **NOT STARTED** | Base rate, prob histogram, meta AUC, gross vs net EV, hit rate, Sharpe formula audit. | Item 2 |
+| **3** | Break-even derived probability gate | **NOT STARTED** | Derive gate $p^* = (SL + friction)/(TP + SL)$ in inner folds; report holdout once. | Item 3 |
+| **4** | Holdout window specification | **NOT STARTED** | Strictly 20% most recent bars after 200-bar warmup and embargo. | Item 4 |
+| **5** | Re-audit full history | **NOT STARTED** | Label shuffle, 1-bar lag, 2x cost stress, DSR with true trials. | Item 5 |
+| **6** | Funding history & Binance onboarding audit | **NOT STARTED** | Document Binance API limit; document unfinded bar treatment; onboardDate check; flat bars. | Item 6 |
+| **7** | Reconcile test count (40 vs 41) | **NOT STARTED** | Investigate and account for all tests. | Item 7 |
 
 ---
 
