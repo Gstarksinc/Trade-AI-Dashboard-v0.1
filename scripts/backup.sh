@@ -15,6 +15,9 @@ STAMP=$(date -u +%Y%m%d_%H%M%S)
 
 mkdir -p "$BACKUP_DIR"
 echo "[$(date -u)] Starting full production backup: ${STAMP}..."
+echo "NOTE: This script creates a logical custom compressed dump only."
+echo "Continuous point-in-time recovery (PITR) requires external WAL archiving"
+echo "(e.g. archive_command or wal-g/pgBackRest) to be configured."
 
 # 1. Trigger Redis Background Save
 echo "[$(date -u)] Triggering Redis BGSAVE..."
@@ -24,22 +27,15 @@ docker compose exec -T redis redis-cli -a "${REDIS_PASSWORD:-redis_local_pass}" 
 echo "[$(date -u)] Archiving WAL..."
 docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_switch_wal();" || true
 
-# 3. Create Custom Compressed pg_dump (all domain schemas)
+# 3. Create Custom Compressed pg_dump (complete database with TimescaleDB hypertables)
 DUMP_FILE="${BACKUP_DIR}/signals_${STAMP}.dump"
-echo "[$(date -u)] Dumping TimescaleDB database schemas to ${DUMP_FILE}..."
+echo "[$(date -u)] Dumping TimescaleDB database to ${DUMP_FILE}..."
 docker compose exec -T db pg_dump \
   -U "$POSTGRES_USER" \
   -d "$POSTGRES_DB" \
   --format=custom \
   --compress=9 \
   --no-owner \
-  --schema="market_data" \
-  --schema="feature_store" \
-  --schema="model_registry" \
-  --schema="signals_ledger" \
-  --schema="paper_execution" \
-  --schema="outbox" \
-  --schema="public" \
   > "$DUMP_FILE"
 
 # 4. Generate SHA256 Checksum
