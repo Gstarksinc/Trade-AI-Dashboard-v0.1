@@ -181,7 +181,12 @@ class ModelTrainer:
         cost_gate_passed = labels_df["cost_gate_passed"].values
 
         # Feature selection
-        exclude_cols = {"open", "high", "low", "close", "volume", "taker_buy_base", "open_time"}
+        # Exclude OHLCV, timestamps, and features requiring short-history public datasets (OI, LSR)
+        exclude_cols = {
+            "open", "high", "low", "close", "volume", "taker_buy_base", "open_time", "close_time",
+            "oi_change_4", "oi_change_24", "oi_zscore", "sum_open_interest",
+            "lsr_ratio", "lsr_delta_4", "lsr_zscore", "ratio",
+        }
         feature_cols = [c for c in features_df.columns if c not in exclude_cols]
         X = features_df[feature_cols].copy().replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
