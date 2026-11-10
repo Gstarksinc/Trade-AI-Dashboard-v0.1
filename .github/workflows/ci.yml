@@ -1,0 +1,154 @@
+name: Production CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    name: Code Quality (Ruff & Mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Linting Tools
+        run: |
+          pip install ruff mypy pydantic pydantic-settings types-redis
+
+      - name: Run Ruff Lint
+        run: ruff check libs/ services/ tests/
+
+      - name: Run Ruff Format Check
+        run: ruff format --check libs/ services/ tests/
+
+      - name: Run Mypy
+        run: mypy --ignore-missing-imports libs/ services/
+
+  docs-and-mermaid-validation:
+    name: Docs & Mermaid Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate Mermaid Diagrams
+        run: |
+          npm install -g @mermaid-js/mermaid-cli
+          # Extract and validate mermaid blocks from docs
+          python3 -c "
+          import re, subprocess, sys
+          content = open('ARCHITECTURE.md').read()
+          blocks = re.findall(r'```mermaid\n(.*?)\n```', content, re.DOTALL)
+          for i, b in enumerate(blocks):
+              with open(f'/tmp/chart_{i}.mmd', 'w') as f:
+                  f.write(b)
+              res = subprocess.run(['mmdc', '-i', f'/tmp/chart_{i}.mmd', '-o', f'/tmp/chart_{i}.svg'])
+              if res.returncode != 0:
+                  print(f'Mermaid chart {i} invalid'); sys.exit(1)
+          print(f'Successfully validated {len(blocks)} Mermaid charts.')
+          "
+
+      - name: Markdown Link Check
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "no"
+          check-modified-files-only: "no"
+
+  unit-and-contract-tests:
+    name: Unit & Contract Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - market-collector
+          - feature-service
+          - model-service
+          - training-service
+          - risk-service
+          - signal-service
+          - paper-exec-service
+          - api-gateway
+          - notifier-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install TA-Lib dependencies (for feature-service)
+        if: matrix.service == 'feature-service'
+        run: |
+          wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+          tar -xzf ta-lib-0.4.0-src.tar.gz
+          cd ta-lib/ && ./configure --prefix=/usr && make && sudo make install
+          cd .. && rm -rf ta-lib*
+
+      - name: Install Service Dependencies
+        run: |
+          pip install -r services/${{ matrix.service }}/requirements.txt
+
+      - name: Run Service Pytest
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          REDIS_URL: redis://localhost:6379/0
+          PYTHONPATH: .
+        run: |
+          pytest services/${{ matrix.service }}/tests -v --asyncio-mode=auto
+
+  e2e-integration:
+    name: End-to-End Pipeline Fixture Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install E2E Dependencies
+        run: |
+          pip install pydantic pydantic-settings pytest pytest-asyncio
+
+      - name: Run E2E Recorded Fixtures Test
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_e2e_pipeline.py -v --asyncio-mode=auto
+
+  docker-build-and-scan:
+    name: Docker Build & Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Core Images
+        run: |
+          docker compose build api-gateway signal-service risk-service
+
+      - name: Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: signals-api-gateway:latest
+          format: "table"
+          exit-code: "0"
+          severity: "CRITICAL,HIGH"
