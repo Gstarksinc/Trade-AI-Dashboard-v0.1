@@ -15,7 +15,7 @@
 | **3** | Break-even derived probability gate | **NOT STARTED** | Derive gate $p^* = (SL + friction)/(TP + SL)$ in inner folds; report holdout once. | Item 3 |
 | **4** | Holdout window specification | **NOT STARTED** | Strictly 20% most recent bars after 200-bar warmup and embargo. | Item 4 |
 | **5** | Re-audit full history | **NOT STARTED** | Label shuffle, 1-bar lag, 2x cost stress, DSR with true trials. | Item 5 |
-| **6** | Funding history & Binance onboarding audit | **NOT STARTED** | Document Binance API limit; document unfinded bar treatment; onboardDate check; flat bars. | Item 6 |
+| **6** | Funding history & Binance onboarding audit | **DONE** | Backfilled 6,420 funding records per symbol (6,495 for SOL) from 2021-01-01 to present with `startTime` pagination; audited all 8 symbols against `onboardDate` via Binance exchangeInfo (all onboarded 2019-2020); verified 0 zero-volume bars and 0 flat bars across 51,352 (1h) and 12,838 (4h) candles; fixed labeling funding accrual to scale by timeframe (8 bars/8h for 1h, 2 bars/8h for 4h) with 1 bp/8h fallback for unprovided/flat funding. | Completed |
 | **7** | Reconcile test count (40 vs 41) | **NOT STARTED** | Investigate and account for all tests. | Item 7 |
 
 ---

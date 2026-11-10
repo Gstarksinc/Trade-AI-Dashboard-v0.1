@@ -18,6 +18,7 @@ def apply_triple_barrier_with_execution(
     fee_pct: float = 0.0005,       # 0.05% taker fee
     slippage_pct: float = 0.0002,  # 0.02% slippage
     max_cost_to_risk: float = 0.25,
+    timeframe: str = "1h",
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """
     Computes triple-barrier labels matching live limit-entry and execution logic:
@@ -142,10 +143,24 @@ def apply_triple_barrier_with_execution(
             touch_times[i] = times[max_idx]
 
         # Step 4: Calculate funding accrual over holding bars
-        # Assuming 15m bars: 1 bar = 0.25h. In 8 hours = 32 bars.
+        # Scale 8h funding rate according to bar timeframe
         bars_held = holding_bars[i]
-        f_rate = funding_rates[fill_idx] if fill_idx < len(funding_rates) else 0.0001
-        funding_accrued = f_rate * (bars_held / 32.0)  # Long pays funding when funding_rate > 0
+        if timeframe == "1h":
+            bars_per_8h = 8.0
+        elif timeframe == "4h":
+            bars_per_8h = 2.0
+        elif timeframe == "15m":
+            bars_per_8h = 32.0
+        else:
+            bars_per_8h = 8.0
+
+        # Funding rate at entry fill (with fallback to 1 bp per 8h if absent/zero)
+        if fill_idx < len(funding_rates) and not np.isnan(funding_rates[fill_idx]) and funding_rates[fill_idx] != 0.0:
+            f_rate = funding_rates[fill_idx]
+        else:
+            f_rate = 0.0001  # Baseline fallback (1 bp / 8h)
+
+        funding_accrued = f_rate * (bars_held / bars_per_8h)  # Long pays funding when funding_rate > 0
 
         gross_returns[i] = raw_ret
         funding_costs[i] = funding_accrued
