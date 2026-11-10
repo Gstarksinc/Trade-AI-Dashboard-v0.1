@@ -6,35 +6,32 @@ x-logging: &logging
     max-size: 10m
     max-file: '5'
 
-x-python: &python
-  build:
-    context: .
-    dockerfile: docker/python.Dockerfile
-  env_file: .env
+x-service-defaults: &service-defaults
   restart: unless-stopped
+  env_file: .env
   logging: *logging
   depends_on:
-    db:
-      condition: service_healthy
     redis:
       condition: service_healthy
+    migrator:
+      condition: service_completed_successfully
 
 services:
   db:
     image: timescale/timescaledb:latest-pg16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-trade_ai}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
     ports:
       - '127.0.0.1:5432:5432'
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
-      interval: 10s
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-trade_ai}']
+      interval: 5s
       timeout: 5s
       retries: 10
     logging: *logging
@@ -42,58 +39,159 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+      --requirepass ${REDIS_PASSWORD:-redis_local_pass}
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_local_pass}
     volumes:
       - redisdata:/data
     ports:
       - '127.0.0.1:6379:6379'
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli -a $$REDIS_PASSWORD ping | grep PONG']
-      interval: 10s
+      test: ['CMD-SHELL', 'redis-cli -a ${REDIS_PASSWORD:-redis_local_pass} ping | grep PONG']
+      interval: 5s
       timeout: 5s
       retries: 10
     logging: *logging
 
-  api:
-    <<: *python
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+  migrator:
+    build:
+      context: .
+      dockerfile: libs/database/Dockerfile
+    restart: 'no'
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-trade_ai}
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+
+  market-collector:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/market-collector/Dockerfile
     ports:
-      - '127.0.0.1:8000:8000'
+      - '127.0.0.1:8001:8001'
 
-  collector:
-    <<: *python
-    command: python -m collector.main
-    profiles: ['full']
+  feature-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/feature-service/Dockerfile
+    ports:
+      - '127.0.0.1:8002:8002'
 
-  notifier:
-    <<: *python
-    command: python -m notifier.main
-    profiles: ['full']
+  model-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/model-service/Dockerfile
+    ports:
+      - '127.0.0.1:8003:8003'
 
-  trainer:
-    <<: *python
-    command: python -m models.train
+  training-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/training-service/Dockerfile
     restart: 'no'
     mem_limit: 16g
     profiles: ['train']
+    ports:
+      - '127.0.0.1:8004:8004'
+
+  risk-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/risk-service/Dockerfile
+    ports:
+      - '127.0.0.1:8005:8005'
+
+  signal-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/signal-service/Dockerfile
+    ports:
+      - '127.0.0.1:8006:8006'
+
+  paper-exec-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/paper-exec-service/Dockerfile
+    ports:
+      - '127.0.0.1:8007:8007'
+
+  api-gateway:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - '8000:8000'
+
+  notifier-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/notifier-service/Dockerfile
+    ports:
+      - '127.0.0.1:8009:8009'
 
   dashboard:
     build: ./dashboard
     restart: unless-stopped
+    env_file: .env
     environment:
-      API_URL: http://api:8000
+      API_URL: http://api-gateway:8000
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
       COINGECKO_BASE_URL: ${COINGECKO_BASE_URL:-https://api.coingecko.com/api/v3}
       USDT_INR_FALLBACK: ${USDT_INR_FALLBACK:-}
     ports:
       - '3000:3000'
     depends_on:
-      - api
-    profiles: ['full']
+      api-gateway:
+        condition: service_started
+    logging: *logging
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    restart: unless-stopped
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    ports:
+      - '127.0.0.1:9090:9090'
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      - prometheus
     logging: *logging
 
 volumes:
   pgdata:
   redisdata:
+  promdata:
+  grafanadata:

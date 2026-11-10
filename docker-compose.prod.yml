@@ -1,0 +1,216 @@
+name: signals-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: '10'
+
+x-service-defaults: &service-defaults
+  restart: always
+  env_file: .env.production
+  logging: *logging
+  networks:
+    - internal-net
+  depends_on:
+    redis:
+      condition: service_healthy
+    migrator:
+      condition: service_completed_successfully
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - internal-net
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+      --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal-net
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a ${REDIS_PASSWORD} ping | grep PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging: *logging
+
+  migrator:
+    build:
+      context: .
+      dockerfile: libs/database/Dockerfile
+    restart: 'no'
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    networks:
+      - internal-net
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+
+  market-collector:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/market-collector/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  feature-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/feature-service/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  model-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/model-service/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  training-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/training-service/Dockerfile
+    restart: 'no'
+    profiles: ['train']
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+
+  risk-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/risk-service/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  signal-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/signal-service/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  paper-exec-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/paper-exec-service/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  api-gateway:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - '127.0.0.1:8000:8000'
+    networks:
+      - internal-net
+      - public-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  notifier-service:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/notifier-service/Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  dashboard:
+    build: ./dashboard
+    restart: always
+    env_file: .env.production
+    environment:
+      API_URL: http://api-gateway:8000
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      COINGECKO_BASE_URL: ${COINGECKO_BASE_URL:-https://api.coingecko.com/api/v3}
+      USDT_INR_FALLBACK: ${USDT_INR_FALLBACK:-}
+    ports:
+      - '127.0.0.1:3000:3000'
+    networks:
+      - internal-net
+      - public-net
+    depends_on:
+      api-gateway:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging: *logging
+
+networks:
+  internal-net:
+    driver: bridge
+  public-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+

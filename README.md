@@ -1,114 +1,97 @@
 # Trade AI Dashboard v0.1
 
-A self-hosted, high-frequency cryptocurrency algorithmic signal platform and institutional-grade trading dashboard: Binance Futures live streaming market data, LightGBM prediction model with meta-labeling, adaptive ATR risk management, Next.js 14 multi-view dashboard, and paper trading execution.
+An institutional-grade, event-driven cryptocurrency algorithmic research platform and paper trading dashboard built on **Python 3.11, FastAPI, TimescaleDB, Redis 7, and Next.js 14**.
 
-> **Disclaimer**: This is an engineering research and paper-trading platform, not financial advice. All orders and portfolio balances are simulated with zero financial risk. It does not place real exchange orders.
-
----
-
-## Current Status & Verification Checklist
-
-| Milestone | Area | Status | Notes |
-|---|---|---|---|
-| **01** | Docker Compose Stack | **Completed** | PostgreSQL 16 (TimescaleDB), Redis 7, FastAPI, Next.js 14 |
-| **02** | Hypertables & TimescaleDB Schema | **Completed** | 6 hypertables (`candles`, `funding_rates`, `open_interest`, etc.) |
-| **03** | Data Ingestion Pipeline | **Completed** | Direct Binance MiniTicker WS (`!miniTicker@arr`) + REST polling |
-| **04** | Feature Pipeline & Triple-Barrier | **Completed** | TA-Lib momentum, derivatives metrics, volatility regimes |
-| **05** | ML Model & Meta-Labeling | **Completed** | Calibrated LightGBM (Stage 1) + Random Forest Meta-Gate (Stage 2) |
-| **06** | Adaptive Risk Engine | **Completed** | ATR stops ($1 : 2.2$ R:R), 3x max leverage, daily loss limits |
-| **07** | FastAPI Core Services | **Completed** | `/health`, `/summary`, `/signals`, `/history`, `/equity`, `/status` |
-| **08** | Signal Lifecycle Transitions | **Completed** | 5 states: *Waiting confirmation*, *Waiting entry*, *Order in progress*, *Win*, *Loss* |
-| **09** | Idempotent Persistence | **Completed** | `/signals/transition` persists status & records paper trades without duplication |
-| **10** | Performance & Trade History | **Completed** | Duration, time-to-target, prediction timestamps, win/loss analytics |
-| **11** | Next.js Multi-View Dashboard | **Completed** | 7 views: Overview, Markets, Signals, Positions, History, Chart, System |
-| **12** | SVG Candlestick Chart | **Completed** | 15m/1h/4h/1D controls, volume histogram, 20/50 EMAs, signal overlays |
-| **13** | Theme & Accessibility | **Completed** | High-contrast Dark & Light modes with WCAG AA compliance |
-| **14** | Automated Unit Test Suite | **Completed** | 21 focused tests passing in `dashboard/tests/signal_lifecycle.test.mjs` |
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed phase breakdowns and forward roadmap items.
+> **Operational Scope**: This platform is engineered strictly for **PAPER TRADING and quantitative research**. There is strictly zero real order execution and zero exchange private keys anywhere.
 
 ---
 
-## Technical Stack
+## Technical Stack & Architecture
 
-| Layer | Technology |
-|---|---|
-| **Language & Backend API** | Python 3.11, FastAPI, Uvicorn, Pydantic |
-| **Market Data Feed** | Binance USD-M Futures Public REST & WebSocket API |
-| **Technical Indicators** | TA-Lib (C library wrapped via Python) |
-| **Machine Learning** | LightGBM (Platt-calibrated) + Meta-Labeling Classifier |
-| **Database & Caching** | PostgreSQL 16 with TimescaleDB extension, Redis 7 |
-| **Frontend Framework** | Next.js 14 (React 18, Server Components & Dynamic SSR) |
-| **Containerization** | Docker Compose with multi-stage production builds |
+- **Microservices**: 10 containerized services under `services/` (each with dedicated `Dockerfile`, `requirements.txt`, health checks, and unit tests).
+- **Event Bus & Messaging**: Redis 7 Streams with consumer groups (`XREADGROUP`, auto-ack, retry, and Dead-Letter Queue `system.dlq`).
+- **Database**: PostgreSQL 16 with TimescaleDB hypertables, domain schemas (`market_data`, `feature_store`, `model_registry`, `signals_ledger`, `paper_execution`, `outbox`), and single Alembic migrations runner.
+- **Machine Learning**: LightGBM (Platt calibrated) + Random Forest Meta-Classifier with Purged Combinatorial CV (CPCV), Deflated Sharpe Ratio (DSR), Probability of Backtest Overfitting (PBO), and strict promotion gates.
+- **Frontend**: Next.js 14 read-only UI with dark/light themes, live ticker bar, per-symbol/per-timeframe model status matrix (champion/shadow/disabled), and paper-trading labels everywhere.
+
+For detailed architecture diagrams, event flows, and domain schema definitions, see [ARCHITECTURE.md](ARCHITECTURE.md) and [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
 
 ---
 
-## Architecture Diagram
+## Quickstart & How to Run
 
-```
-Binance Futures REST / WS ──► collector ──► TimescaleDB ──► features (TA-Lib + derivatives data)
-                                                                    │
-                                                            LightGBM + Meta-Filter
-                                                                    │
-                                                        risk engine (entry / SL / TP / sizing)
-                                                                    │
-                                            FastAPI ◄───────────────┴────► Redis (pub/sub)
-                                               │
-                                    ┌──────────┴──────────┐
-                                    ▼                     ▼
-                             Next.js Dashboard     /signals/transition
-                              (Port :3000)          (Idempotent DB writes)
-```
-
-Full architectural specifications, data flows, and state machine diagrams are detailed in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
----
-
-## Monitored Futures Universe
-
-The system actively tracks 8 liquid Binance USD-M perpetual contracts:
-`BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `XRPUSDT`, `DOGEUSDT`, `LINKUSDT`, `TRXUSDT`.
-
-All tracked coins adhere strictly to the 5-stage lifecycle:
-1. **Waiting for confirmation**: Monitoring market structure; no confirmed breakout setup.
-2. **Waiting for entry**: Breakout confirmed ($P \ge 0.55$ + Meta-Gate); limit entry pending.
-3. **Order in progress**: Market price touched entry; paper trade actively open with live floating P&L.
-4. **Win — Target hit**: Take-profit target reached; trade closed with positive return.
-5. **Loss — Stop loss hit**: Stop-loss touched; trade closed with controlled risk limit.
-
-Completed trades immediately transition into **Performance & Trade History** with trade duration, time-to-target, and exact entry/exit prices.
-
----
-
-## Deployment & Server Commands
-
-### Quick Start (Debian 12/13 Host)
-
+### 1. Environment Setup
+Copy the sample environment configuration:
 ```bash
-git clone https://github.com/Gstarksinc/Trade-AI-Dashboard-v0.1.git /opt/signals
-cd /opt/signals
-bash scripts/gen_env.sh            # creates .env with secure random passwords
-docker compose up -d --build       # starts db, redis, api, collector, dashboard
+cp .env.example .env
 ```
 
-### Apply Latest Repository Updates
-
+### 2. Run Database Migrations
+Run the one-shot migrator container to create all domain schemas, hypertables, and indexes:
 ```bash
-cd /opt/signals
-git pull origin main
-docker compose build --no-cache dashboard api
-docker compose up -d dashboard api
-docker logs --tail 30 -f signals-dashboard-1
+docker compose run --rm migrator
 ```
 
-Access the dashboard at `http://SERVER_IP:3000` (or via SSH tunnel: `ssh -L 3000:127.0.0.1:3000 user@SERVER_IP`).
+### 3. Start Infrastructure & Microservices
+```bash
+# Start all microservices in detached mode
+docker compose up -d
+
+# Check running containers
+docker compose ps
+```
+
+### 4. Verify Service Health Probes
+```bash
+curl -s http://localhost:8000/health  # API Gateway
+curl -s http://localhost:8001/health  # Market Collector
+curl -s http://localhost:8002/health  # Feature Service
+curl -s http://localhost:8003/health  # Model Service
+curl -s http://localhost:8004/health  # Training Service
+curl -s http://localhost:8005/health  # Risk Service
+curl -s http://localhost:8006/health  # Signal Service
+curl -s http://localhost:8007/health  # Paper Execution Service
+curl -s http://localhost:8009/health  # Notifier Service
+```
+
+### 5. Access the Next.js Dashboard
+Open [http://localhost:3000](http://localhost:3000) in your web browser.
 
 ---
 
-## Documentation Index
+## How to Test
 
-- [Comprehensive Architecture & Technical Specification](docs/ARCHITECTURE.md)
-- [Dashboard API Contract & Endpoints](docs/DASHBOARD_API.md)
-- [Project Roadmap & Checklist](docs/ROADMAP.md)
-- [Debian Server Host Setup Guide](docs/SETUP_DEBIAN.md)
-- [Data Collector Technical Guide](docs/COLLECTOR.md)
+### 1. Run Microservice Test Suites
+```bash
+pytest services/market-collector/tests
+pytest services/feature-service/tests
+pytest services/model-service/tests
+pytest services/training-service/tests
+pytest services/risk-service/tests
+pytest services/signal-service/tests
+pytest services/paper-exec-service/tests
+pytest tests/test_e2e_pipeline.py
+```
+
+### 2. Run Leakage Audit Suite
+```bash
+python -m services.training-service.leakage_audit
+```
+
+### 3. Run Frontend Production Build & Unit Tests
+```bash
+npm run build --prefix dashboard
+```
+
+---
+
+## Production Deployment
+
+A hardened production configuration is available in `docker-compose.prod.yml`:
+- Internal bridge network isolation (`internal-net`) preventing external exposure of internal microservices.
+- Hard resource reservations and memory limits.
+- Log rotation (`json-file`, max 50MB $\times$ 10 files).
+- Production command:
+  ```bash
+  docker compose -f docker-compose.prod.yml up -d
+  ```
