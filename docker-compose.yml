@@ -79,6 +79,12 @@ services:
       dockerfile: services/market-collector/Dockerfile
     ports:
       - '127.0.0.1:8001:8001'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   feature-service:
     <<: *service-defaults
@@ -87,6 +93,12 @@ services:
       dockerfile: services/feature-service/Dockerfile
     ports:
       - '127.0.0.1:8002:8002'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   model-service:
     <<: *service-defaults
@@ -95,6 +107,12 @@ services:
       dockerfile: services/model-service/Dockerfile
     ports:
       - '127.0.0.1:8003:8003'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   training-service:
     <<: *service-defaults
@@ -106,6 +124,12 @@ services:
     profiles: ['train']
     ports:
       - '127.0.0.1:8004:8004'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   risk-service:
     <<: *service-defaults
@@ -114,6 +138,12 @@ services:
       dockerfile: services/risk-service/Dockerfile
     ports:
       - '127.0.0.1:8005:8005'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   signal-service:
     <<: *service-defaults
@@ -122,6 +152,12 @@ services:
       dockerfile: services/signal-service/Dockerfile
     ports:
       - '127.0.0.1:8006:8006'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8006/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   paper-exec-service:
     <<: *service-defaults
@@ -130,6 +166,12 @@ services:
       dockerfile: services/paper-exec-service/Dockerfile
     ports:
       - '127.0.0.1:8007:8007'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8007/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   api-gateway:
     <<: *service-defaults
@@ -138,6 +180,12 @@ services:
       dockerfile: services/api-gateway/Dockerfile
     ports:
       - '8000:8000'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   notifier-service:
     <<: *service-defaults
@@ -146,6 +194,12 @@ services:
       dockerfile: services/notifier-service/Dockerfile
     ports:
       - '127.0.0.1:8009:8009'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   dashboard:
     build: ./dashboard
@@ -158,6 +212,12 @@ services:
       USDT_INR_FALLBACK: ${USDT_INR_FALLBACK:-}
     ports:
       - '3000:3000'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       api-gateway:
         condition: service_started
@@ -172,6 +232,12 @@ services:
       - promdata:/prometheus
     ports:
       - '127.0.0.1:9090:9090'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     logging: *logging
 
   grafana:
@@ -186,6 +252,12 @@ services:
       - grafanadata:/var/lib/grafana
     ports:
       - '127.0.0.1:3001:3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       - prometheus
     logging: *logging
