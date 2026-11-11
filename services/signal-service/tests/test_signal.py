@@ -1,11 +1,21 @@
 """Unit tests for signal-service state machine and optimistic locking."""
 
+from pathlib import Path
+import sys
 from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from services.signal_service.state_machine import SignalStateMachine, VALID_TRANSITIONS
-from services.signal_service.consumer import SignalConsumer
+SERVICE_ROOT = Path(__file__).resolve().parent.parent
+if str(SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICE_ROOT))
+
+try:
+    from state_machine import SignalStateMachine, VALID_TRANSITIONS
+    from consumer import SignalConsumer
+except ImportError:
+    from services.signal_service.state_machine import SignalStateMachine, VALID_TRANSITIONS
+    from services.signal_service.consumer import SignalConsumer
 
 
 def test_valid_and_invalid_transitions():

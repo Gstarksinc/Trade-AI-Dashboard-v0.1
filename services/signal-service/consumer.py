@@ -96,6 +96,7 @@ class SignalConsumer:
             direction = sig["direction"].lower()
             entry = sig["entry"]
             sl = sig["stop_loss"]
+            tp = sig.get("take_profit")
             version = sig["version"]
 
             if status == "waiting_for_entry":
@@ -127,6 +128,33 @@ class SignalConsumer:
                             sig["status"] = "order_in_progress"
                             sig["version"] = version + 1
                             await self._emit_state_change(sig_id, symbol, status, "order_in_progress", version + 1, "entry_touched")
+
+            elif status == "order_in_progress":
+                if direction == "long":
+                    # Conservative SL-first rule
+                    if mark_price <= sl:
+                        success = await self.sm.transition_state(sig_id, status, "loss_stop_loss_hit", version, "stop_loss_hit")
+                        if success:
+                            active_for_sym.pop(sig_id, None)
+                            await self._emit_state_change(sig_id, symbol, status, "loss_stop_loss_hit", version + 1, "stop_loss_hit")
+                    elif tp is not None and mark_price >= tp:
+                        success = await self.sm.transition_state(sig_id, status, "win_target_hit", version, "take_profit_hit")
+                        if success:
+                            active_for_sym.pop(sig_id, None)
+                            await self._emit_state_change(sig_id, symbol, status, "win_target_hit", version + 1, "take_profit_hit")
+
+                elif direction == "short":
+                    # Short side: SL above entry, TP below entry
+                    if mark_price >= sl:
+                        success = await self.sm.transition_state(sig_id, status, "loss_stop_loss_hit", version, "stop_loss_hit")
+                        if success:
+                            active_for_sym.pop(sig_id, None)
+                            await self._emit_state_change(sig_id, symbol, status, "loss_stop_loss_hit", version + 1, "stop_loss_hit")
+                    elif tp is not None and mark_price <= tp:
+                        success = await self.sm.transition_state(sig_id, status, "win_target_hit", version, "take_profit_hit")
+                        if success:
+                            active_for_sym.pop(sig_id, None)
+                            await self._emit_state_change(sig_id, symbol, status, "win_target_hit", version + 1, "take_profit_hit")
 
     async def _emit_state_change(self, sig_id: int, symbol: str, prev: str, new: str, version: int, trigger: str):
         self.transitions_count += 1
