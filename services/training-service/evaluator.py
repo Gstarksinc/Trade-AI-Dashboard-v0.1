@@ -150,15 +150,26 @@ def compute_deflated_sharpe_ratio(
     return float(round(dsr, 4))
 
 
-def compute_pbo(cpcv_path_sharpes: List[float]) -> float:
+def compute_pbo(
+    cpcv_path_sharpes: List[float],
+    candidate_ranks: Optional[List[float]] = None,
+) -> float:
     """
-    Probability of Backtest Overfitting (PBO) from CPCV path performance.
-    Estimates the probability that the chosen strategy underperforms the median.
+    Computes Probability of Backtest Overfitting (PBO).
+    1. If multi-trial candidate ranks are provided (Marcos López de Prado's CSCV/CPCV PBO):
+       Computes the probability that the strategy chosen as optimal in-sample ranks below the median
+       out-of-sample: PBO = mean(rel_rank <= 0.5).
+    2. If only single-strategy path Sharpes are provided:
+       Computes the non-positive path Sharpe rate: mean(arr <= 0.0).
     """
+    if candidate_ranks and len(candidate_ranks) > 0:
+        arr_ranks = np.array(candidate_ranks)
+        pbo = float(np.mean(arr_ranks <= 0.5))
+        return float(round(pbo, 4))
     if not cpcv_path_sharpes:
         return 0.5
     arr = np.array(cpcv_path_sharpes)
-    pbo = np.mean(arr <= 0.0)
+    pbo = float(np.mean(arr <= 0.0))
     return float(round(pbo, 4))
 
 
@@ -241,6 +252,7 @@ def run_unified_evaluation(
     max_holding_bars: int = 24,
     timeframe: str = "1h",
     cpcv_sharpes: Optional[List[float]] = None,
+    cpcv_ranks: Optional[List[float]] = None,
     min_holdout_trades: int = 20,
     max_ece: float = 0.12,
 ) -> Dict[str, any]:
@@ -361,7 +373,8 @@ def run_unified_evaluation(
     # Overfitting metrics
     dsr_trials, dsr_derivation = get_dsr_trial_count()
     dsr = compute_deflated_sharpe_ratio(annualized_trade_sharpe, n_trials=dsr_trials, var_sharpe=0.5, n_obs=final_trades_count)
-    pbo = compute_pbo(cpcv_list)
+    pbo = compute_pbo(cpcv_list, candidate_ranks=cpcv_ranks)
+    non_positive_sharpe_rate = float(np.mean(np.array(cpcv_list) <= 0.0)) if cpcv_list else 0.5
 
     return {
         "funnel": funnel,
@@ -404,6 +417,12 @@ def run_unified_evaluation(
         },
         "overfitting": {
             "pbo": pbo,
+            "non_positive_sharpe_rate": round(non_positive_sharpe_rate, 4),
+            "pbo_explanation": (
+                "Marcos López de Prado's CSCV/CPCV PBO: probability that the strategy selected in-sample "
+                f"ranks below the median out-of-sample across combinatorial paths (PBO={pbo}). "
+                f"Non-positive Sharpe path fraction: {round(non_positive_sharpe_rate, 4)}."
+            ),
             "dsr": dsr,
             "dsr_trials": dsr_trials,
             "dsr_derivation": dsr_derivation,
