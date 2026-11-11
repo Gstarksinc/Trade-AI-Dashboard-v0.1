@@ -110,10 +110,14 @@ async def run_batch_evaluation(symbols: List[str] = None, timeframes: List[str] 
                     "total_bars": len(candles),
                     "fill_rate": fill_stats["fill_rate"],
                     "gate_pass_rate": fill_stats["gate_pass_rate"],
+                    "thresholds": metrics.get("inner_thresholds", {}),
+                    "funnel": metrics.get("funnel", {}),
                     "holdout_trades": holdout["executed_trades"],
                     "holdout_net_ev_pct": holdout["net_ev_pct"],
                     "bootstrap_ci_95": holdout["bootstrap_ci_95"],
                     "holdout_sharpe": holdout["holdout_sharpe"],
+                    "per_trade_sharpe": holdout.get("per_trade_sharpe", 0.0),
+                    "trades_per_year": holdout.get("trades_per_year", 0.0),
                     "median_cpcv_sharpe": cpcv["sharpe"]["median"],
                     "ece": holdout["ece"],
                     "dsr": holdout["deflated_sharpe_ratio"],
@@ -148,8 +152,10 @@ if __name__ == "__main__":
     for r in out["results"]:
         print(f"\nModel: {r['symbol']} ({r['timeframe']}) - {r['version']}")
         print(f"  Total Bars: {r['total_bars']}, Fill Rate: {r['fill_rate']}, Gate Pass Rate: {r['gate_pass_rate']}")
+        print(f"  Thresholds Selected in Inner Folds: prob={r['thresholds'].get('prob_threshold')} (p*={r['thresholds'].get('p_star_breakeven')}), meta={r['thresholds'].get('meta_threshold')}")
+        print(f"  Funnel: candidate={r['funnel'].get('candidate_bars')} -> prob={r['funnel'].get('prob_gate_passed')} -> meta={r['funnel'].get('meta_gate_passed')} -> cost={r['funnel'].get('cost_gate_passed')} -> limit_fill={r['funnel'].get('limit_fill_passed')}")
         print(f"  Holdout Trades: {r['holdout_trades']}, Net EV: {r['holdout_net_ev_pct']}%, 95% CI: {r['bootstrap_ci_95']}%")
-        print(f"  Holdout Sharpe: {r['holdout_sharpe']}, Median CPCV Sharpe: {r['median_cpcv_sharpe']}")
+        print(f"  Annualized Sharpe: {r['holdout_sharpe']} (per-trade: {r['per_trade_sharpe']}, trades/year: {r['trades_per_year']}), Median CPCV Sharpe: {r['median_cpcv_sharpe']}")
         print(f"  ECE: {r['ece']}, DSR: {r['dsr']}, PBO: {r['pbo']}")
         print(f"  Promotion Approved: {r['promotion_approved']}")
         print(f"  Gates Breakdown: {r['gates_breakdown']}")

@@ -27,9 +27,13 @@ try:
         compute_deflated_sharpe_ratio,
         compute_pbo,
         optimize_thresholds_inner_fold,
+        select_thresholds_inner_fold,
+        derive_breakeven_probability_gate,
+        run_unified_evaluation,
         evaluate_promotion_gates,
         compare_candidate_vs_champion_holdout,
         get_dsr_trial_count,
+        UnifiedThresholdConfig,
     )
 except (ImportError, ValueError):
     from labeling import apply_triple_barrier_with_execution, compute_sample_uniqueness_weights
@@ -42,9 +46,13 @@ except (ImportError, ValueError):
         compute_deflated_sharpe_ratio,
         compute_pbo,
         optimize_thresholds_inner_fold,
+        select_thresholds_inner_fold,
+        derive_breakeven_probability_gate,
+        run_unified_evaluation,
         evaluate_promotion_gates,
         compare_candidate_vs_champion_holdout,
         get_dsr_trial_count,
+        UnifiedThresholdConfig,
     )
 
 log = logging.getLogger("training-service.trainer")
@@ -174,6 +182,7 @@ class ModelTrainer:
             max_holding_bars=max_holding_bars,
             limit_wait_bars=2,
             max_cost_to_risk=0.25,
+            timeframe=timeframe,
         )
 
         # 2. Sample-uniqueness weights
@@ -247,13 +256,19 @@ class ModelTrainer:
         rf_meta = RandomForestClassifier(n_estimators=80, max_depth=4, random_state=42)
         rf_meta.fit(X_tr_meta, meta_y_train.astype(int))
 
-        # 5. Inner-fold Threshold Selection
+        # 5. Inner-fold Threshold Selection (Derive break-even gate and select in inner folds)
+        p_star = derive_breakeven_probability_gate(
+            pt_multiplier=2.0, sl_multiplier=1.0, friction=0.0014, avg_sl_pct=0.015
+        )
         meta_oof_probs = rf_meta.predict_proba(X_tr_meta)[:, 1]
-        best_p, best_m, _ = optimize_thresholds_inner_fold(
+        best_p, best_m, best_ev = select_thresholds_inner_fold(
             primary_probs=oof_primary_probs,
             meta_probs=meta_oof_probs,
-            directions=np.where(oof_primary_probs >= 0.5, 1, -1),
             net_returns=net_returns[:train_end_idx],
+            is_filled=cost_gate_passed[:train_end_idx],
+            cost_gate_passed=cost_gate_passed[:train_end_idx],
+            p_star=p_star,
+            min_trades=15,
         )
 
         # 6. Combinatorial Purged CV (CPCV) Path Distribution
@@ -270,7 +285,7 @@ class ModelTrainer:
             if len(path_returns) > 5:
                 mean_r = np.mean(path_returns)
                 std_r = np.std(path_returns)
-                sr = (mean_r / std_r * np.sqrt(365 * 24)) if std_r > 0 else 0.0
+                sr = (mean_r / std_r * np.sqrt(365 * (24 if timeframe == '1h' else 6))) if std_r > 0 else 0.0
                 cpcv_sharpes.append(float(round(sr, 3)))
                 cpcv_mdds.append(float(round(compute_max_drawdown(path_returns), 4)))
                 pos = path_returns[path_returns > 0]
@@ -278,49 +293,41 @@ class ModelTrainer:
                 pf = float(np.sum(pos) / np.sum(neg)) if np.sum(neg) > 0 else 1.5
                 cpcv_pfs.append(float(round(pf, 3)))
 
-        # 7. Evaluate on Final Untouched Holdout Set
+        # 7. Evaluate on Final Untouched Holdout Set using Unified Evaluation Function
         holdout_primary_probs = calibrated_primary.predict_proba(X_holdout)[:, 1]
         X_h_meta = X_holdout.copy()
         X_h_meta["primary_prob"] = holdout_primary_probs
         X_h_meta["primary_conf"] = np.abs(holdout_primary_probs - 0.5)
         holdout_meta_probs = rf_meta.predict_proba(X_h_meta)[:, 1]
 
-        # Apply inner thresholds and cost-to-risk gate to holdout
-        trade_mask = (holdout_primary_probs >= best_p) & (holdout_meta_probs >= best_m) & filled_holdout & cost_gate_holdout
-        executed_holdout_returns = net_ret_holdout[trade_mask]
-
-        # ECE on holdout
-        ece_val, mce_val = calculate_expected_calibration_error(y_holdout.values, holdout_primary_probs, n_bins=10)
-
-        # 8. Check Phase 3.1 Strict Promotion Gates
-        promotion_approved, gate_metrics = evaluate_promotion_gates(
-            holdout_net_returns=executed_holdout_returns,
-            ece=ece_val,
+        gross_ret_holdout = labels_df["gross_return"].values[split_idx:]
+        eval_result = run_unified_evaluation(
+            holdout_primary_probs=holdout_primary_probs,
+            holdout_meta_probs=holdout_meta_probs,
+            holdout_net_returns=net_ret_holdout,
+            holdout_gross_returns=gross_ret_holdout,
+            holdout_filled_flags=filled_holdout,
+            holdout_cost_gate_flags=cost_gate_holdout,
+            y_holdout=y_holdout.values,
+            prob_threshold=best_p,
+            meta_threshold=best_m,
+            p_star=p_star,
+            total_bars=len(candles_df),
+            warmup_bars=len(candles_df) - len(features_df),
+            embargo_bars=embargo_bars,
+            limit_wait_bars=2,
+            max_holding_bars=max_holding_bars,
+            timeframe=timeframe,
             cpcv_sharpes=cpcv_sharpes,
-            min_trades=20,     # Enforced holdout trade floor
+            min_holdout_trades=20,
             max_ece=0.12,
         )
 
-        # 9. Deflated Sharpe & PBO with configurable trial count & logged derivation
-        dsr_trials, dsr_derivation = get_dsr_trial_count()
-        log.info("Computing DSR: %s", dsr_derivation)
-        holdout_sharpe = float(np.mean(executed_holdout_returns) / np.std(executed_holdout_returns) * np.sqrt(365 * 24)) if len(executed_holdout_returns) > 2 and np.std(executed_holdout_returns) > 0 else 0.0
-        dsr = compute_deflated_sharpe_ratio(holdout_sharpe, n_trials=dsr_trials, var_sharpe=0.5, n_obs=len(executed_holdout_returns))
-        pbo = compute_pbo(cpcv_sharpes)
-
-        # Reliability Curve (10 probability bins)
-        bins = np.linspace(0.0, 1.0, 11)
-        bin_idx = np.digitize(holdout_primary_probs, bins) - 1
-        reliability_curve = []
-        for b in range(10):
-            m = bin_idx == b
-            if np.any(m):
-                reliability_curve.append({
-                    "bin_center": round(float((bins[b] + bins[b+1]) / 2.0), 2),
-                    "mean_predicted": round(float(np.mean(holdout_primary_probs[m])), 3),
-                    "empirical_accuracy": round(float(np.mean(y_holdout.values[m])), 3),
-                    "count": int(np.sum(m)),
-                })
+        promotion_approved = eval_result["promotion_approved"]
+        tp = eval_result["trade_performance"]
+        sh_audit = eval_result["sharpe_audit"]
+        cal_out = eval_result["calibration"]
+        of_out = eval_result["overfitting"]
 
         # Save artifacts with SHA256 checksums
         version = f"LGBM-V31-{symbol}-{timeframe}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
@@ -355,22 +362,30 @@ class ModelTrainer:
             "inner_thresholds": {
                 "prob_threshold": best_p,
                 "meta_threshold": best_m,
+                "p_star_breakeven": p_star,
             },
+            "funnel": eval_result["funnel"],
             "holdout_evaluation": {
                 "total_holdout_bars": len(X_holdout),
-                "executed_trades": len(executed_holdout_returns),
-                "net_ev_pct": gate_metrics["mean_net_ev_pct"],
-                "bootstrap_ci_95": gate_metrics["bootstrap_ci_95"],
-                "holdout_sharpe": round(holdout_sharpe, 2),
-                "holdout_max_drawdown": round(compute_max_drawdown(executed_holdout_returns), 4),
-                "ece": gate_metrics["ece"],
-                "deflated_sharpe_ratio": dsr,
-                "pbo": pbo,
+                "executed_trades": tp["executed_trades"],
+                "gross_ev_pct": tp["gross_ev_pct"],
+                "net_ev_pct": tp["net_ev_pct"],
+                "bootstrap_ci_95": tp["bootstrap_ci_95"],
+                "hit_rate_pct": tp["hit_rate_pct"],
+                "holdout_sharpe": sh_audit["annualized_trade_sharpe"],
+                "per_trade_sharpe": sh_audit["per_trade_sharpe"],
+                "trades_per_year": sh_audit["trades_per_year"],
+                "holdout_max_drawdown": tp["max_drawdown_pct"],
+                "ece": cal_out["ece"],
+                "mce": cal_out["mce"],
+                "deflated_sharpe_ratio": of_out["dsr"],
+                "pbo": of_out["pbo"],
+                "sharpe_audit": sh_audit,
             },
             "cpcv_distributions": {
                 "sharpe": {
                     "min": float(np.min(cpcv_sharpes)) if cpcv_sharpes else 0.0,
-                    "median": gate_metrics["median_cpcv_sharpe"],
+                    "median": float(np.median(cpcv_sharpes)) if cpcv_sharpes else -1.0,
                     "max": float(np.max(cpcv_sharpes)) if cpcv_sharpes else 0.0,
                     "paths_count": len(cpcv_sharpes),
                 },
@@ -381,9 +396,9 @@ class ModelTrainer:
                     "median": float(np.median(cpcv_mdds)) if cpcv_mdds else 0.0,
                 },
             },
-            "reliability_curve": reliability_curve,
+            "reliability_curve": cal_out["reliability_curve"],
             "drift_report": drift_report,
-            "promotion_gates": gate_metrics["gates"],
+            "promotion_gates": eval_result["promotion_gates"],
             "promotion_approved": promotion_approved,
         }
 
