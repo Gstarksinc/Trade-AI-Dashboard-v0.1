@@ -147,3 +147,4 @@ We trace a long BTC trade with virtual equity \$10,000.00:
    - $\text{Accrued Funding USD} = \$0.20 \text{ USD}$
    - $\text{Net PnL USD} = \$100.00 - \$3.50 - \$0.20 = +\$96.30 \text{ USD}$
    - $\text{Net Return on Risk} = \frac{\$96.30}{\$50.00} = +192.6\%$ ($1 : 1.926 \text{ realized R:R}$ after all costs).
+

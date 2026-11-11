@@ -62,3 +62,4 @@ API Gateway Status Notice:       "No validated model. Zero models promoted."
 1. Refine quantitative feature engineering (e.g. order-book imbalance, funding rate term structure, cross-sectional momentum).
 2. Execute a new training run via `training-service` with logged experiment tracking.
 3. Once a candidate passes all six promotion gates, enroll the artifact into `model_registry.models` as `'challenger'`, triggering automatic shadow execution.
+

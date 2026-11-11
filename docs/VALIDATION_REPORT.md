@@ -89,3 +89,4 @@ Retired / Rejected:      16
 Active Signal Trading:   DISENGAGED
 Gateway / UI Banner:     "No validated model"
 ```
+

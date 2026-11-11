@@ -129,3 +129,4 @@ $$\text{DSR} = \Phi\left(\frac{(\widehat{\text{SR}} - \text{SR}^*) \sqrt{T-1}}{\
 $$\text{SR}^* = \sqrt{2 \ln(N_{\text{trials}})} \left(1 - \frac{\gamma}{\sqrt{2 \ln(N_{\text{trials}})}}\right) + \frac{\text{Euler-Mascheroni}}{\sqrt{2 \ln(N_{\text{trials}})}}$$
 
 - **Dynamic Trial Derivation**: $N_{\text{trials}}$ is not hardcoded. It is dynamically queried directly from the `model_registry.experiments` database table, which logs every parameter combination and threshold variant evaluated ($N_{\text{trials}} = 208+$).
+

@@ -45,3 +45,48 @@ groups:
         annotations:
           summary: "API Gateway P95 latency exceeds 500ms"
           description: "Current P95 latency is {{ $value }}s."
+
+      - alert: CollectorDowntime
+        expr: signals_collector_heartbeat_missing > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "market-collector heartbeat missing"
+          description: "market-collector has not emitted heartbeat for >15s."
+
+      - alert: RedisMemoryHigh
+        expr: signals_redis_memory_used_bytes > 429496729
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory utilization > 80%"
+          description: "Redis memory usage is {{ $value }} bytes (>80% of 512MB ceiling)."
+
+      - alert: FeatureDriftDetected
+        expr: signals_feature_drift_psi > 0.25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feature distribution drift detected"
+          description: "PSI score is {{ $value }} (>0.25 threshold)."
+
+      - alert: DailyLossLimitHalt
+        expr: signals_daily_loss_halt > 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Trading halted by daily loss limit"
+          description: "Rolling 24h loss exceeded 3.0% equity ceiling."
+
+      - alert: ModelReloadFailure
+        expr: signals_model_reload_errors_total > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Model service artifact reload failure"
+          description: "model-service failed to hot-reload champion artifact."

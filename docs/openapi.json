@@ -1,0 +1,263 @@
+﻿{
+    "openapi":  "3.1.0",
+    "info":  {
+                 "title":  "Trade AI Gateway",
+                 "version":  "1.0.0"
+             },
+    "paths":  {
+                  "/health":  {
+                                  "get":  {
+                                              "summary":  "Health",
+                                              "operationId":  "health_health_get",
+                                              "responses":  {
+                                                                "200":  {
+                                                                            "description":  "Successful Response",
+                                                                            "content":  {
+                                                                                            "application/json":  {
+                                                                                                                     "schema":  {
+
+                                                                                                                                }
+                                                                                                                 }
+                                                                                        }
+                                                                        }
+                                                            }
+                                          }
+                              },
+                  "/status":  {
+                                  "get":  {
+                                              "summary":  "Get System Status",
+                                              "description":  "Returns live feed status and per-symbol/per-timeframe model status\n(champion / shadow / disabled) with honest \u0027no active model\u0027 check.",
+                                              "operationId":  "get_system_status_status_get",
+                                              "responses":  {
+                                                                "200":  {
+                                                                            "description":  "Successful Response",
+                                                                            "content":  {
+                                                                                            "application/json":  {
+                                                                                                                     "schema":  {
+
+                                                                                                                                }
+                                                                                                                 }
+                                                                                        }
+                                                                        }
+                                                            }
+                                          }
+                              },
+                  "/signals":  {
+                                   "get":  {
+                                               "summary":  "Get Signals",
+                                               "description":  "Returns active predictive signals with honest waiting states.",
+                                               "operationId":  "get_signals_signals_get",
+                                               "responses":  {
+                                                                 "200":  {
+                                                                             "description":  "Successful Response",
+                                                                             "content":  {
+                                                                                             "application/json":  {
+                                                                                                                      "schema":  {
+
+                                                                                                                                 }
+                                                                                                                  }
+                                                                                         }
+                                                                         }
+                                                             }
+                                           }
+                               },
+                  "/history":  {
+                                   "get":  {
+                                               "summary":  "Get Trade History",
+                                               "description":  "Returns completed paper trade history.",
+                                               "operationId":  "get_trade_history_history_get",
+                                               "parameters":  [
+                                                                  {
+                                                                      "name":  "limit",
+                                                                      "in":  "query",
+                                                                      "required":  false,
+                                                                      "schema":  {
+                                                                                     "type":  "integer",
+                                                                                     "default":  50,
+                                                                                     "title":  "Limit"
+                                                                                 }
+                                                                  }
+                                                              ],
+                                               "responses":  {
+                                                                 "200":  {
+                                                                             "description":  "Successful Response",
+                                                                             "content":  {
+                                                                                             "application/json":  {
+                                                                                                                      "schema":  {
+
+                                                                                                                                 }
+                                                                                                                  }
+                                                                                         }
+                                                                         },
+                                                                 "422":  {
+                                                                             "description":  "Validation Error",
+                                                                             "content":  {
+                                                                                             "application/json":  {
+                                                                                                                      "schema":  {
+                                                                                                                                     "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                 }
+                                                                                                                  }
+                                                                                         }
+                                                                         }
+                                                             }
+                                           }
+                               },
+                  "/summary":  {
+                                   "get":  {
+                                               "summary":  "Get Account Summary",
+                                               "description":  "Returns paper trading account summary.",
+                                               "operationId":  "get_account_summary_summary_get",
+                                               "responses":  {
+                                                                 "200":  {
+                                                                             "description":  "Successful Response",
+                                                                             "content":  {
+                                                                                             "application/json":  {
+                                                                                                                      "schema":  {
+
+                                                                                                                                 }
+                                                                                                                  }
+                                                                                         }
+                                                                         }
+                                                             }
+                                           }
+                               },
+                  "/equity":  {
+                                  "get":  {
+                                              "summary":  "Get Equity Curve",
+                                              "description":  "Returns equity curve history.",
+                                              "operationId":  "get_equity_curve_equity_get",
+                                              "parameters":  [
+                                                                 {
+                                                                     "name":  "days",
+                                                                     "in":  "query",
+                                                                     "required":  false,
+                                                                     "schema":  {
+                                                                                    "type":  "integer",
+                                                                                    "default":  30,
+                                                                                    "title":  "Days"
+                                                                                }
+                                                                 }
+                                                             ],
+                                              "responses":  {
+                                                                "200":  {
+                                                                            "description":  "Successful Response",
+                                                                            "content":  {
+                                                                                            "application/json":  {
+                                                                                                                     "schema":  {
+
+                                                                                                                                }
+                                                                                                                 }
+                                                                                        }
+                                                                        },
+                                                                "422":  {
+                                                                            "description":  "Validation Error",
+                                                                            "content":  {
+                                                                                            "application/json":  {
+                                                                                                                     "schema":  {
+                                                                                                                                    "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                }
+                                                                                                                 }
+                                                                                        }
+                                                                        }
+                                                            }
+                                          }
+                              },
+                  "/events/stream":  {
+                                         "get":  {
+                                                     "summary":  "Events Stream",
+                                                     "description":  "Multiplexed Server-Sent Events (SSE) stream.\nFeatures:\n- 15s heartbeat comment (: heartbeat\\n\\n).\n- Throttled tick updates (1/s/symbol).\n- Last-Event-ID resume support.",
+                                                     "operationId":  "events_stream_events_stream_get",
+                                                     "parameters":  [
+                                                                        {
+                                                                            "name":  "Last-Event-ID",
+                                                                            "in":  "header",
+                                                                            "required":  false,
+                                                                            "schema":  {
+                                                                                           "anyOf":  [
+                                                                                                         {
+                                                                                                             "type":  "string"
+                                                                                                         },
+                                                                                                         {
+                                                                                                             "type":  "null"
+                                                                                                         }
+                                                                                                     ],
+                                                                                           "title":  "Last-Event-Id"
+                                                                                       }
+                                                                        }
+                                                                    ],
+                                                     "responses":  {
+                                                                       "200":  {
+                                                                                   "description":  "Successful Response",
+                                                                                   "content":  {
+                                                                                                   "application/json":  {
+                                                                                                                            "schema":  {
+
+                                                                                                                                       }
+                                                                                                                        }
+                                                                                               }
+                                                                               },
+                                                                       "422":  {
+                                                                                   "description":  "Validation Error",
+                                                                                   "content":  {
+                                                                                                   "application/json":  {
+                                                                                                                            "schema":  {
+                                                                                                                                           "$ref":  "#/components/schemas/HTTPValidationError"
+                                                                                                                                       }
+                                                                                                                        }
+                                                                                               }
+                                                                               }
+                                                                   }
+                                                 }
+                                     }
+              },
+    "components":  {
+                       "schemas":  {
+                                       "HTTPValidationError":  {
+                                                                   "properties":  {
+                                                                                      "detail":  {
+                                                                                                     "items":  {
+                                                                                                                   "$ref":  "#/components/schemas/ValidationError"
+                                                                                                               },
+                                                                                                     "type":  "array",
+                                                                                                     "title":  "Detail"
+                                                                                                 }
+                                                                                  },
+                                                                   "type":  "object",
+                                                                   "title":  "HTTPValidationError"
+                                                               },
+                                       "ValidationError":  {
+                                                               "properties":  {
+                                                                                  "loc":  {
+                                                                                              "items":  {
+                                                                                                            "anyOf":  [
+                                                                                                                          {
+                                                                                                                              "type":  "string"
+                                                                                                                          },
+                                                                                                                          {
+                                                                                                                              "type":  "integer"
+                                                                                                                          }
+                                                                                                                      ]
+                                                                                                        },
+                                                                                              "type":  "array",
+                                                                                              "title":  "Location"
+                                                                                          },
+                                                                                  "msg":  {
+                                                                                              "type":  "string",
+                                                                                              "title":  "Message"
+                                                                                          },
+                                                                                  "type":  {
+                                                                                               "type":  "string",
+                                                                                               "title":  "Error Type"
+                                                                                           }
+                                                                              },
+                                                               "type":  "object",
+                                                               "required":  [
+                                                                                "loc",
+                                                                                "msg",
+                                                                                "type"
+                                                                            ],
+                                                               "title":  "ValidationError"
+                                                           }
+                                   }
+                   }
+}

@@ -90,3 +90,4 @@ Every symbol was cross-referenced against Binance official contract launch dates
 | **TRXUSDT** | 2020-05-15 | 2021-01-01 00:00:00 | **YES** | Pre-dates dataset by 7 months |
 
 All 8 perpetual contracts were actively traded on Binance USD-M Futures prior to January 1, 2021, ensuring 100% genuine liquidity and price discovery throughout the entire historical training and evaluation window.
+
