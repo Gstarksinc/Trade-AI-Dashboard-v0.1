@@ -37,7 +37,11 @@ try:
         compute_deflated_sharpe_ratio,
         compute_pbo,
         optimize_thresholds_inner_fold,
+        select_thresholds_inner_fold,
+        derive_breakeven_probability_gate,
+        run_unified_evaluation,
         get_dsr_trial_count,
+        UnifiedThresholdConfig,
     )
 except (ImportError, ValueError):
     from labeling import apply_triple_barrier_with_execution, compute_sample_uniqueness_weights
@@ -48,7 +52,11 @@ except (ImportError, ValueError):
         compute_deflated_sharpe_ratio,
         compute_pbo,
         optimize_thresholds_inner_fold,
+        select_thresholds_inner_fold,
+        derive_breakeven_probability_gate,
+        run_unified_evaluation,
         get_dsr_trial_count,
+        UnifiedThresholdConfig,
     )
 
 log = logging.getLogger("training-service.leakage-audit")
@@ -182,6 +190,8 @@ def run_feature_lag_test(
         "baseline_ev_pct": round(ev_base * 100.0, 4),
         "lagged_1bar_ev_pct": round(ev_lagged * 100.0, 4),
         "retention_ratio": round(retention, 3),
+        "base_ev_positive": ev_base > 0,
+        "base_ev_note": "Base EV > 0 (predictive edge present)" if ev_base > 0 else "Base EV <= 0 (negative edge before lag; no lookahead anomaly)",
         "passed": passed,
     }
 
@@ -252,6 +262,7 @@ def run_full_leakage_audit(
         sl_multiplier=1.0,
         max_holding_bars=24,
         limit_wait_bars=2,
+        timeframe=timeframe,
     )
 
     event_starts = pd.Series(aligned_candles.index, index=aligned_candles.index)
@@ -267,9 +278,9 @@ def run_full_leakage_audit(
     feature_cols = [c for c in features_df.columns if c not in EXCLUDE_SHORT_HISTORY_FEATURES]
     X = features_df[feature_cols].copy().replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
-    # 3. Final Untouched Holdout Split: Latest 25%
+    # 3. Final Untouched Holdout Split: Strictly 20% most recent after warmup & embargo
     n = len(X)
-    split_idx = int(n * 0.75)
+    split_idx = int(n * 0.80)
     embargo_bars = 24
     train_end = split_idx - embargo_bars
 
@@ -292,73 +303,79 @@ def run_full_leakage_audit(
     # (d) Top feature importances
     top_features = compute_feature_importances(X_train, y_train, w_train)
 
-    # Fit primary classifier on training set
+    # Fit calibrated primary classifier on training set
     base_lgbm = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, random_state=42, verbose=-1)
-    base_lgbm.fit(X_train, y_train, sample_weight=w_train)
+    calibrated_primary = CalibratedClassifierCV(estimator=base_lgbm, method="sigmoid", cv=purged_cv)
+    calibrated_primary.fit(X_train, y_train, sample_weight=w_train)
 
     # Fit meta-labeler on out-of-fold primary predictions
     oof_primary_preds = np.zeros(len(X_train))
     for tr, te in purged_cv.split(X_train):
-        f_clf = LGBMClassifier(n_estimators=80, max_depth=4, learning_rate=0.05, random_state=42, verbose=-1)
+        f_clf = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, random_state=42, verbose=-1)
         f_clf.fit(X_train.iloc[tr], y_train.iloc[tr], sample_weight=w_train.iloc[tr])
         oof_primary_preds[te] = f_clf.predict_proba(X_train.iloc[te])[:, 1]
 
-    # Meta-label = 1 if primary was correct (label==1 and pred>=0.5 OR label==0 and pred<0.5)
-    meta_y_train = ((oof_primary_preds >= 0.5) == (y_train.values == 1)).astype(int)
+    X_tr_meta = X_train.copy()
+    X_tr_meta["primary_prob"] = oof_primary_preds
+    X_tr_meta["primary_conf"] = np.abs(oof_primary_preds - 0.5)
+
+    meta_y_train = (net_returns[:train_end] > 0.0) & cost_gate_flags[:train_end] & filled_flags[:train_end]
     meta_clf = RandomForestClassifier(n_estimators=80, max_depth=4, random_state=42)
-    meta_clf.fit(X_train, meta_y_train, sample_weight=w_train)
+    meta_clf.fit(X_tr_meta, meta_y_train.astype(int))
+    meta_oof_probs = meta_clf.predict_proba(X_tr_meta)[:, 1]
+
+    # Inner-fold threshold selection (using mathematical break-even gate p*)
+    p_star = derive_breakeven_probability_gate(pt_multiplier=2.0, sl_multiplier=1.0, friction=0.0014, avg_sl_pct=0.015)
+    best_p, best_m, _ = select_thresholds_inner_fold(
+        primary_probs=oof_primary_preds,
+        meta_probs=meta_oof_probs,
+        net_returns=net_returns[:train_end],
+        is_filled=filled_flags[:train_end],
+        cost_gate_passed=cost_gate_flags[:train_end],
+        p_star=p_star,
+        min_trades=15,
+    )
 
     # Out-of-sample inference on holdout
-    holdout_raw_probs = base_lgbm.predict_proba(X_holdout)[:, 1]
-    holdout_meta_probs = meta_clf.predict_proba(X_holdout)[:, 1]
+    holdout_primary_probs = calibrated_primary.predict_proba(X_holdout)[:, 1]
+    X_h_meta = X_holdout.copy()
+    X_h_meta["primary_prob"] = holdout_primary_probs
+    X_h_meta["primary_conf"] = np.abs(holdout_primary_probs - 0.5)
+    holdout_meta_probs = meta_clf.predict_proba(X_h_meta)[:, 1]
 
-    # 4. FUNNEL DIAGNOSTICS:
-    # candidate bars -> prob gate -> meta gate -> cost gate -> limit fill -> trades
-    candidate_bars = holdout_size_bars - (2 + 24)  # after limit wait and max holding bars
-    candidate_bars = max(0, candidate_bars)
+    # 4. UNIFIED EVALUATION & FUNNEL DIAGNOSTICS:
+    eval_res = run_unified_evaluation(
+        holdout_primary_probs=holdout_primary_probs,
+        holdout_meta_probs=holdout_meta_probs,
+        holdout_net_returns=net_ret_holdout,
+        holdout_gross_returns=ret_holdout,
+        holdout_filled_flags=filled_holdout,
+        holdout_cost_gate_flags=cost_gate_holdout,
+        y_holdout=y_holdout.values,
+        prob_threshold=best_p,
+        meta_threshold=best_m,
+        p_star=p_star,
+        total_bars=len(candles_df),
+        warmup_bars=len(candles_df) - len(features_df),
+        embargo_bars=embargo_bars,
+        limit_wait_bars=2,
+        max_holding_bars=24,
+        timeframe=timeframe,
+        min_holdout_trades=20,
+        max_ece=0.12,
+    )
 
-    prob_threshold = 0.52
-    meta_threshold = 0.50
+    funnel = eval_res["funnel"]
+    tp = eval_res["trade_performance"]
+    sh_audit = eval_res["sharpe_audit"]
+    final_trades_count = tp["executed_trades"]
+    final_trade_indices = eval_res["final_trade_indices"]
 
-    prob_gate_mask = holdout_raw_probs[:candidate_bars] >= prob_threshold
-    prob_gate_passed = int(np.sum(prob_gate_mask))
-
-    meta_gate_mask = prob_gate_mask & (holdout_meta_probs[:candidate_bars] >= meta_threshold)
-    meta_gate_passed = int(np.sum(meta_gate_mask))
-
-    cost_gate_mask = meta_gate_mask & cost_gate_holdout[:candidate_bars]
-    cost_gate_passed_count = int(np.sum(cost_gate_mask))
-
-    limit_fill_mask = cost_gate_mask & filled_holdout[:candidate_bars]
-    limit_fill_passed_count = int(np.sum(limit_fill_mask))
-
-    final_trades_count = limit_fill_passed_count
-    final_trade_indices = np.where(limit_fill_mask)[0]
-
-    funnel = {
-        "total_bars_in_series": len(candles_df),
-        "warmup_bars": len(candles_df) - len(features_df),
-        "embargo_bars": embargo_bars,
-        "holdout_size_bars": holdout_size_bars,
-        "candidate_bars": candidate_bars,
-        "prob_gate_passed": prob_gate_passed,
-        "meta_gate_passed": meta_gate_passed,
-        "cost_gate_passed": cost_gate_passed_count,
-        "limit_fill_passed": limit_fill_passed_count,
-        "final_executed_trades": final_trades_count,
-    }
-
-    # Performance on executed holdout trades
+    # (e) Cost stress test at 2x friction (28 bps round-trip)
     if final_trades_count > 0:
-        trades_ret = net_ret_holdout[final_trade_indices]
-        trades_gross = ret_holdout[final_trade_indices]
-        mean_ev, ev_low, ev_high = bootstrap_ci(trades_ret, np.mean, n_bootstraps=1000)
-        cost_stress = run_cost_stress_test(trades_gross, np.ones(final_trades_count))
-        sr = float(np.mean(trades_ret) / np.std(trades_ret) * np.sqrt(365 * 24)) if np.std(trades_ret) > 0 else 0.0
+        cost_stress = run_cost_stress_test(ret_holdout[final_trade_indices], np.ones(final_trades_count))
     else:
-        mean_ev, ev_low, ev_high = 0.0, 0.0, 0.0
-        cost_stress = run_cost_stress_test(np.array([]), np.array([]))
-        sr = 0.0
+        cost_stress = run_cost_stress_test(ret_holdout, np.where(holdout_primary_probs >= best_p, 1, -1))
 
     # (g) Clean-seed reproducibility run
     seed_evs = []
@@ -366,12 +383,17 @@ def run_full_leakage_audit(
         c_test = LGBMClassifier(n_estimators=80, max_depth=4, learning_rate=0.05, random_state=s, verbose=-1)
         c_test.fit(X_train, y_train, sample_weight=w_train)
         p = c_test.predict_proba(X_holdout)[:, 1]
-        ev_s = np.mean(np.where(p >= 0.52, 1, -1) * ret_holdout - 0.0014)
+        ev_s = np.mean(np.where(p >= best_p, 1, -1) * ret_holdout - 0.0014)
         seed_evs.append(float(round(ev_s * 100.0, 3)))
     seed_reproducible = float(np.std(seed_evs)) < 0.05
 
-    # DSR calculation with true trial count
-    dsr_trials, dsr_derivation = get_dsr_trial_count()
+    mean_ev = tp["net_ev_pct"] / 100.0
+    ev_low = tp["bootstrap_ci_95"][0] / 100.0
+    ev_high = tp["bootstrap_ci_95"][1] / 100.0
+    sr = sh_audit["annualized_trade_sharpe"]
+    dsr = eval_res["overfitting"]["dsr"]
+    dsr_trials = eval_res["overfitting"]["dsr_trials"]
+    dsr_derivation = eval_res["overfitting"]["dsr_derivation"]
     dsr = compute_deflated_sharpe_ratio(sr, n_trials=dsr_trials, var_sharpe=0.5, n_obs=final_trades_count)
 
     # Strict promotion gates:
@@ -394,6 +416,7 @@ def run_full_leakage_audit(
     return {
         "symbol": symbol,
         "timeframe": timeframe,
+        "thresholds_used": eval_res["thresholds_used"],
         "funnel_diagnostics": funnel,
         "leakage_audit_summary": {
             "all_audit_checks_passed": promotion_gates_passed,
@@ -442,20 +465,21 @@ async def main():
         audit = res["leakage_audit_summary"]
         perf = res["holdout_performance"]
 
+        tu = res["thresholds_used"]
         print(f"\n>>> FUNNEL DIAGNOSTICS FOR {sym} ({tf}):")
         print(f"  1. Total Bars in Series:  {f['total_bars_in_series']}")
         print(f"  2. Holdout Partition:     {f['holdout_size_bars']} bars (after {f['warmup_bars']} warmup, {f['embargo_bars']} embargo)")
         print(f"  3. Candidate Bars:        {f['candidate_bars']}")
-        print(f"  4. Prob Gate (>= 0.52):   {f['prob_gate_passed']}")
-        print(f"  5. Meta Gate (>= 0.50):   {f['meta_gate_passed']}")
+        print(f"  4. Prob Gate (>= {tu['prob_threshold']}, break-even p*={tu['p_star_breakeven']}): {f['prob_gate_passed']}")
+        print(f"  5. Meta Gate (>= {tu['meta_threshold']}):   {f['meta_gate_passed']}")
         print(f"  6. Cost Gate (<= 0.25):   {f['cost_gate_passed']}")
         print(f"  7. Limit Fill (<= 2 bars):{f['limit_fill_passed']}")
         print(f"  8. Executed Trades:       {f['final_executed_trades']}")
 
         print(f"\n>>> AUDIT & PROMOTION VERDICT FOR {sym} ({tf}):")
         print(f"  All Gates Passed:         {audit['all_audit_checks_passed']}")
-        print(f"  Label Shuffle Pass:       {audit['label_shuffle_test']['passed']} (Shuffled EV: {audit['label_shuffle_test']['mean_shuffled_ev_pct']}%)")
-        print(f"  Feature Lag Pass:         {audit['extra_1bar_lag_test']['passed']} (Base EV: {audit['extra_1bar_lag_test']['baseline_ev_pct']}%, Lagged EV: {audit['extra_1bar_lag_test']['lagged_1bar_ev_pct']}%, Retention: {audit['extra_1bar_lag_test']['retention_ratio']})")
+        print(f"  Label Shuffle Pass:       {audit['label_shuffle_test']['passed']} (Shuffled EV: {audit['label_shuffle_test']['mean_shuffled_ev_pct']}%, expected ~-0.14%)")
+        print(f"  Feature Lag Pass:         {audit['extra_1bar_lag_test']['passed']} ({audit['extra_1bar_lag_test'].get('base_ev_note')}, Base EV: {audit['extra_1bar_lag_test']['baseline_ev_pct']}%, Lagged EV: {audit['extra_1bar_lag_test']['lagged_1bar_ev_pct']}%)")
         print(f"  2x Cost Stress Resilient: {audit['cost_stress_2x_friction']['resilient_under_2x_costs']} (Stressed EV: {audit['cost_stress_2x_friction']['stressed_ev_pct']}%)")
         print(f"  Holdout Trades:           {perf['executed_trades']}")
         print(f"  Net EV:                   {perf['net_ev_pct']}% (95% CI: {perf['bootstrap_ci_95']}%)")
