@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from libs.database.connection import engine
-from libs.common.risk_rules import check_cost_to_risk_gate
+from libs.common.risk_rules import check_cost_to_risk_gate, DEFAULT_BARRIER_CONFIG
 try:
     from .config import settings
     from .correlation_clusters import get_cluster
@@ -154,10 +154,10 @@ class RiskEvaluator:
         if median_atr > 0 and atr > (median_atr * settings.volatility_shock_multiplier):
             return False, None, f"Halt: Volatility shock detected (ATR={atr:.2f} > 3x median={median_atr:.2f})"
 
-        # 3. Verified Long vs Short Side Price Levels
+        # 3. Verified Long vs Short Side Price Levels using Shared Barrier Config
         entry_price = current_price
-        pt_mult = 2.0
-        sl_mult = 1.0
+        pt_mult = DEFAULT_BARRIER_CONFIG.pt_multiplier
+        sl_mult = DEFAULT_BARRIER_CONFIG.sl_multiplier
 
         dir_clean = direction.lower()
         if dir_clean == "long":

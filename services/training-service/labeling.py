@@ -4,13 +4,13 @@ from datetime import datetime
 from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
-from libs.common.risk_rules import check_cost_to_risk_gate
+from libs.common.risk_rules import check_cost_to_risk_gate, DEFAULT_BARRIER_CONFIG
 
 
 def apply_triple_barrier_with_execution(
     df: pd.DataFrame,
-    pt_multiplier: float = 2.0,
-    sl_multiplier: float = 1.0,
+    pt_multiplier: float = DEFAULT_BARRIER_CONFIG.pt_multiplier,
+    sl_multiplier: float = DEFAULT_BARRIER_CONFIG.sl_multiplier,
     max_holding_bars: int = 24,
     limit_wait_bars: int = 2,
     atr_col: str = "atr_14",

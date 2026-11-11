@@ -14,13 +14,16 @@ from scipy.stats import norm
 log = logging.getLogger("training-service.evaluator")
 
 
+from libs.common.risk_rules import DEFAULT_BARRIER_CONFIG
+
+
 @dataclass
 class UnifiedThresholdConfig:
     """Unified configuration for training, funnel diagnostics, and leakage audit."""
-    pt_multiplier: float = 2.0
-    sl_multiplier: float = 1.0
-    friction: float = 0.0014          # 14 bps round-trip
-    max_cost_to_risk: float = 0.25     # Max round-trip cost / stop distance
+    pt_multiplier: float = DEFAULT_BARRIER_CONFIG.pt_multiplier
+    sl_multiplier: float = DEFAULT_BARRIER_CONFIG.sl_multiplier
+    friction: float = DEFAULT_BARRIER_CONFIG.default_friction          # 14 bps round-trip
+    max_cost_to_risk: float = DEFAULT_BARRIER_CONFIG.max_cost_to_risk_ratio     # Max round-trip cost / stop distance
     holdout_pct: float = 0.20          # 20% untouched final holdout
     warmup_bars: int = 200             # Warmup bars required for indicator lookbacks
     embargo_bars: int = 24             # Embargo between train and holdout
@@ -31,10 +34,28 @@ class UnifiedThresholdConfig:
     max_ece: float = 0.12              # ECE promotion ceiling
 
 
+def compute_per_setup_breakeven_p_star(
+    atrs: np.ndarray,
+    closes: np.ndarray,
+    pt_multiplier: float = DEFAULT_BARRIER_CONFIG.pt_multiplier,
+    sl_multiplier: float = DEFAULT_BARRIER_CONFIG.sl_multiplier,
+    friction: float = DEFAULT_BARRIER_CONFIG.default_friction,
+) -> np.ndarray:
+    """
+    Computes per-setup dynamic break-even probability gate p* from each bar's ATR%:
+      p*_i = (stop%_i + cost) / (target%_i + stop%_i)
+    """
+    atr_pct = np.where(closes > 0, atrs / closes, 0.015)
+    stop_pct = sl_multiplier * atr_pct
+    target_pct = pt_multiplier * atr_pct
+    denom = target_pct + stop_pct
+    return np.where(denom > 0, (stop_pct + friction) / denom, 0.3644)
+
+
 def derive_breakeven_probability_gate(
-    pt_multiplier: float = 2.0,
-    sl_multiplier: float = 1.0,
-    friction: float = 0.0014,
+    pt_multiplier: float = DEFAULT_BARRIER_CONFIG.pt_multiplier,
+    sl_multiplier: float = DEFAULT_BARRIER_CONFIG.sl_multiplier,
+    friction: float = DEFAULT_BARRIER_CONFIG.default_friction,
     avg_sl_pct: float = 0.015,
 ) -> float:
     """

@@ -140,12 +140,12 @@ flowchart TD
   - All features calculated strictly on completed historical candle boundaries (`open_time`). No future data is accessible.
 
 ### 3.3 Risk Management Engine
-- **ATR Dynamic Volatility Stops**:
+- **ATR Dynamic Volatility Stops** (Unified across `libs/common/risk_rules.py`, `risk-service`, `training-service`, and `paper-exec-service`):
   - Long Stop Loss: $\text{Entry} - (1.0 \times \text{ATR}_{14})$
-  - Long Take Profit: $\text{Entry} + (2.2 \times \text{ATR}_{14})$
+  - Long Take Profit: $\text{Entry} + (2.0 \times \text{ATR}_{14})$
   - Short Stop Loss: $\text{Entry} + (1.0 \times \text{ATR}_{14})$
-  - Short Take Profit: $\text{Entry} - (2.2 \times \text{ATR}_{14})$
-  - Minimum Risk-to-Reward ratio: $1 : 2.2$.
+  - Short Take Profit: $\text{Entry} - (2.0 \times \text{ATR}_{14})$
+  - Minimum Risk-to-Reward ratio: $1 : 2.0$ (`pt_multiplier=2.0`, `sl_multiplier=1.0`). Live production value is strictly $2.0\times$.
 - **Capital Protection & Leverage Constraints**:
   - Maximum leverage cap: $3.0\times$.
   - Maximum correlated positions: 3 open positions simultaneously.
