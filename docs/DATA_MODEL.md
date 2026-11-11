@@ -275,3 +275,4 @@ Provides the **Transactional Outbox Pattern** guaranteeing at-least-once event p
 - **Unique Constraints**: `event_id` (`text UNIQUE`), `idempotency_key` (`text UNIQUE`).
 - **Index**: `idx_outbox_pending (status, id ASC) WHERE status = 'pending'`.
 - **Lifecycle**: Services insert domain rows and outbox records within a single database transaction. An outbox background worker polls `status = 'pending'`, publishes to Redis Streams, and marks `status = 'published'` with `published_at = now()`.
+

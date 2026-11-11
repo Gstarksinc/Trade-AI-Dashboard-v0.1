@@ -189,3 +189,4 @@ The real-time live trading pipeline progresses through nine coordinated phases a
 - On startup, `market-collector` verifies candle continuity:
   $$\Delta t = t_{k} - t_{k-1}$$
 - If $\Delta t > 1 \text{ period}$ (e.g., missed 1h or 4h candle due to container restart), it queries Binance REST `/fapi/v1/klines` with pagination (1,500 bars/request) to backfill missing bars before resuming the WebSocket stream.
+
