@@ -385,6 +385,7 @@ class ModelTrainer:
             timeframe=timeframe,
             cpcv_sharpes=cpcv_sharpes,
             cpcv_ranks=cpcv_ranks,
+            holdout_funding_fallback_flags=labels_df["funding_fallback_used"].values[split_idx:] if "funding_fallback_used" in labels_df.columns else None,
             min_holdout_trades=20,
             max_ece=0.12,
         )

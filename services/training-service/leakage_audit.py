@@ -384,6 +384,7 @@ def run_full_leakage_audit(
         limit_wait_bars=2,
         max_holding_bars=24,
         timeframe=timeframe,
+        holdout_funding_fallback_flags=labels_df["funding_fallback_used"].values[split_idx:] if "funding_fallback_used" in labels_df.columns else None,
         min_holdout_trades=20,
         max_ece=0.12,
     )

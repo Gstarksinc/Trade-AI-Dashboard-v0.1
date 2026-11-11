@@ -52,6 +52,7 @@ def apply_triple_barrier_with_execution(
     gross_returns = np.zeros(n, dtype=float)
     net_returns = np.zeros(n, dtype=float)
     funding_costs = np.zeros(n, dtype=float)
+    funding_fallback_flags = np.zeros(n, dtype=bool)
     holding_bars = np.zeros(n, dtype=int)
     barriers = ["unfilled"] * n
     touch_times = [None] * n
@@ -154,20 +155,25 @@ def apply_triple_barrier_with_execution(
         else:
             bars_per_8h = 8.0
 
-        # Funding rate at entry fill (with fallback to 1 bp per 8h if absent/zero)
-        if fill_idx < len(funding_rates) and not np.isnan(funding_rates[fill_idx]) and funding_rates[fill_idx] != 0.0:
+        # Funding rate at entry fill (with fallback to 1 bp per 8h strictly if absent/NaN)
+        if fill_idx < len(funding_rates) and not np.isnan(funding_rates[fill_idx]):
             f_rate = funding_rates[fill_idx]
+            used_fallback = False
         else:
             f_rate = 0.0001  # Baseline fallback (1 bp / 8h)
+            used_fallback = True
 
         funding_accrued = f_rate * (bars_held / bars_per_8h)  # Long pays funding when funding_rate > 0
 
         gross_returns[i] = raw_ret
         funding_costs[i] = funding_accrued
+        funding_fallback_flags[i] = used_fallback
         net_returns[i] = raw_ret - round_trip_friction - funding_accrued
 
     fill_rate = float(filled_count / total_signals) if total_signals > 0 else 0.0
     gate_pass_rate = float(np.sum(cost_gate_passed) / total_signals) if total_signals > 0 else 0.0
+    fallback_uses_count = int(np.sum(funding_fallback_flags[filled_flags]))
+    fallback_uses_rate = float(fallback_uses_count / filled_count) if filled_count > 0 else 0.0
 
     result = pd.DataFrame(
         {
@@ -177,6 +183,7 @@ def apply_triple_barrier_with_execution(
             "gross_return": gross_returns,
             "net_return": net_returns,
             "funding_cost": funding_costs,
+            "funding_fallback_used": funding_fallback_flags,
             "holding_bars": holding_bars,
             "barrier": barriers,
             "touch_time": touch_times,
@@ -189,6 +196,8 @@ def apply_triple_barrier_with_execution(
         "filled_trades": filled_count,
         "fill_rate": round(fill_rate, 4),
         "gate_pass_rate": round(gate_pass_rate, 4),
+        "funding_fallback_count": fallback_uses_count,
+        "funding_fallback_rate": round(fallback_uses_rate, 4),
     }
 
     return result, stats

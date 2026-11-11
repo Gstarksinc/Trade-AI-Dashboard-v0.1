@@ -286,6 +286,7 @@ def run_unified_evaluation(
     timeframe: str = "1h",
     cpcv_sharpes: Optional[List[float]] = None,
     cpcv_ranks: Optional[List[float]] = None,
+    holdout_funding_fallback_flags: Optional[np.ndarray] = None,
     min_holdout_trades: int = 20,
     max_ece: float = 0.12,
 ) -> Dict[str, any]:
@@ -409,6 +410,26 @@ def run_unified_evaluation(
     pbo = compute_pbo(cpcv_list, candidate_ranks=cpcv_ranks)
     non_positive_sharpe_rate = float(np.mean(np.array(cpcv_list) <= 0.0)) if cpcv_list else 0.5
 
+    # Funding fallback tracking and EV exclusion
+    if holdout_funding_fallback_flags is not None and len(final_trade_indices) > 0:
+        fb_flags = np.array(holdout_funding_fallback_flags)[final_trade_indices]
+        fallback_trades_count = int(np.sum(fb_flags))
+        clean_mask = ~fb_flags
+        if np.sum(clean_mask) > 0:
+            clean_net_ev = float(np.mean(trades_net_ret[clean_mask]))
+            clean_net_ev_pct = round(clean_net_ev * 100.0, 3)
+            clean_trades_count = int(np.sum(clean_mask))
+        else:
+            clean_net_ev_pct = 0.0
+            clean_trades_count = 0
+        if fallback_trades_count > 0:
+            log.warning("Funding fallback was used in %d / %d executed trades (excluded from clean EV: %.3f%%)",
+                        fallback_trades_count, final_trades_count, clean_net_ev_pct)
+    else:
+        fallback_trades_count = 0
+        clean_trades_count = final_trades_count
+        clean_net_ev_pct = round(mean_ev * 100.0, 3)
+
     return {
         "funnel": funnel,
         "final_trade_indices": final_trade_indices,
@@ -419,8 +440,11 @@ def run_unified_evaluation(
         },
         "trade_performance": {
             "executed_trades": final_trades_count,
+            "funding_fallback_trades_count": fallback_trades_count,
+            "clean_trades_count": clean_trades_count,
             "gross_ev_pct": round(float(np.mean(trades_gross_ret)) * 100.0, 3) if final_trades_count > 0 else 0.0,
             "net_ev_pct": round(mean_ev * 100.0, 3),
+            "clean_net_ev_pct": clean_net_ev_pct,
             "bootstrap_ci_95": [round(ev_low * 100.0, 3), round(ev_high * 100.0, 3)],
             "hit_rate_pct": round(hit_rate * 100.0, 2),
             "win_count": win_count,
