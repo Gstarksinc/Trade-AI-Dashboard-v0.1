@@ -15,3 +15,4 @@ Establish a **Server-Authoritative Lifecycle**:
 ## Consequences
 - **Positive**: Complete elimination of client-induced state corruption; guaranteed idempotence; zero concurrency race conditions.
 - **Negative**: Rejected transitions due to version collisions must be handled cleanly by callers (retried or logged).
+

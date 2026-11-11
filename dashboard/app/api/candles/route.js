@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const BINANCE_FAPI = process.env.BINANCE_FAPI_URL || 'https://fapi.binance.com';
+const BINANCE_FAPI = process.env.BINANCE_FAPI_URL || '';
 const TRACKED = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'];
 
 export async function GET(request) {
@@ -15,6 +15,15 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Unsupported symbol' }, { status: 400 });
   }
 
+  if (!BINANCE_FAPI) {
+    return NextResponse.json({
+      success: true,
+      symbol,
+      interval,
+      candles: [],
+    });
+  }
+
   try {
     const res = await fetch(
       `${BINANCE_FAPI}/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`,
@@ -25,7 +34,7 @@ export async function GET(request) {
     );
 
     if (!res.ok) {
-      throw new Error(`Binance responded with status ${res.status}`);
+      throw new Error(`Market feed responded with status ${res.status}`);
     }
 
     const rawKlines = await res.json();
@@ -55,7 +64,7 @@ export async function GET(request) {
       symbol,
       interval,
       candles: [],
-      error: err.message || 'Failed to fetch candlestick data from Binance Futures',
+      error: err.message || 'Failed to fetch candlestick data from market feed',
     }, { status: 502 });
   }
 }

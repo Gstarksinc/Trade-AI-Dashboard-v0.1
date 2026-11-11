@@ -147,3 +147,4 @@ data: {"signal_id": 999, "symbol": "BTCUSDT", "new_state": "order_in_progress", 
 - **Status Codes**: Standard HTTP codes (`400 Bad Request`, `404 Not Found`, `502 Bad Gateway`, `503 Service Unavailable`).
 - **No Mutating Endpoints**: There are zero POST/PUT/DELETE endpoints exposed on the public gateway for trade placement, limit order modification, or state transitions. The API is strictly read-only.
 - **CORS Configuration**: Gateway permits CORS from `*` for local development, allowing the Next.js frontend on port 3000 to consume REST and SSE streams seamlessly.
+

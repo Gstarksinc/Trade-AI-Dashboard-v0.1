@@ -2,10 +2,18 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const BINANCE_FAPI = process.env.BINANCE_FAPI_URL || 'https://fapi.binance.com';
+const BINANCE_FAPI = process.env.BINANCE_FAPI_URL || '';
 const TRACKED = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT'];
 
 export async function GET() {
+  if (!BINANCE_FAPI) {
+    return NextResponse.json({
+      success: true,
+      timestamp: Date.now(),
+      prices: {},
+    });
+  }
+
   try {
     // Fetch 24hr tickers for price, change, high, low
     const res = await fetch(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, {
@@ -14,7 +22,7 @@ export async function GET() {
     });
 
     if (!res.ok) {
-      throw new Error(`Binance responded with status ${res.status}`);
+      throw new Error(`Market feed responded with status ${res.status}`);
     }
 
     const items = await res.json();

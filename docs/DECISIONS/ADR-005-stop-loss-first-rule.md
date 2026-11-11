@@ -13,3 +13,4 @@ Whenever both Take Profit and Stop Loss barriers are breached within the same ba
 ## Consequences
 - **Positive**: Eliminates optimistic survivorship bias; aligns simulated paper fills with worst-case institutional execution reality.
 - **Negative**: Slightly reduces theoretical win rate during extreme high-volatility spikes.
+

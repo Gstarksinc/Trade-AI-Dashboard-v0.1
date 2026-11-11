@@ -80,3 +80,4 @@ Prometheus evaluates alert rules defined in `docker/alerts.yml` every 15 seconds
   - `RedisMemoryHigh`: Memory usage $>80\%$ of 512MB ceiling.
   - `FeatureDriftDetected`: PSI score $>0.25$ for $>5\text{m}$.
   - `ApiLatencyHigh`: Gateway P95 latency $>500\text{ms}$ for $>2\text{m}$.
+

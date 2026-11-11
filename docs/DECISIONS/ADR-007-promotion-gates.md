@@ -20,3 +20,4 @@ Zero models are promoted to Champion or Challenger if any single gate fails. In 
 ## Consequences
 - **Positive**: Institutional capital preservation; zero tolerance for false discoveries or statistical illusions.
 - **Negative**: Currently all 16 tested models fail promotion, leaving live execution disengaged until superior quantitative alpha is discovered.
+

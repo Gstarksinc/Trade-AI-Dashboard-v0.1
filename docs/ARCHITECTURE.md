@@ -185,3 +185,66 @@ The client dashboard is a **Next.js 14** application operating in server-side re
 - **No Direct Service Calls**: The dashboard connects solely to `api-gateway:8000`.
 - **No State Mutations**: The dashboard does not compute or publish signal transitions. Earlier legacy proxy routes (`/api/signals/transition`) were completely excised.
 - **Multiplexed SSE Stream**: The gateway provides an active Server-Sent Events endpoint (`GET /events/stream`) delivering real-time price updates (throttled to 1/s/symbol) and signal lifecycle events with `Last-Event-ID` reconnection replay and 15-second keep-alive heartbeats (`: heartbeat\n\n`).
+
+---
+
+## 8. Container Deployment Topology Diagram (Mermaid)
+
+```mermaid
+flowchart TB
+    subgraph HostPC ["Windows PC Host (Docker Desktop / WSL 2)"]
+        subgraph PortsPublic ["Public Bindings (0.0.0.0)"]
+            P3000["Port :3000"]
+            P8000["Port :8000"]
+            P3001["Port :3001"]
+        end
+
+        subgraph PortsLocal ["Localhost Bindings (127.0.0.1)"]
+            P8001["Port :8001 (collector)"]
+            P8002["Port :8002 (features)"]
+            P8003["Port :8003 (model)"]
+            P8004["Port :8004 (training-service)"]
+            P8005["Port :8005 (risk)"]
+            P8006["Port :8006 (signal)"]
+            P8007["Port :8007 (paper-exec)"]
+            P8009["Port :8009 (notifier)"]
+            P5432["Port :5432 (TimescaleDB)"]
+            P6379["Port :6379 (Redis 7)"]
+            P9090["Port :9090 (Prometheus)"]
+        end
+
+        subgraph DockerNet ["Docker Bridge Network (signals_default)"]
+            C_UI["signals-dashboard-1"]
+            C_GW["signals-api-gateway-1"]
+            C_GRAF["signals-grafana-1"]
+            C_MC["signals-market-collector-1"]
+            C_FS["signals-feature-service-1"]
+            C_MS["signals-model-service-1"]
+            C_RS["signals-risk-service-1"]
+            C_SS["signals-signal-service-1"]
+            C_PE["signals-paper-exec-service-1"]
+            C_NS["signals-notifier-service-1"]
+            C_DB["signals-db-1 (TimescaleDB)"]
+            C_RD["signals-redis-1 (Redis 7)"]
+            C_PROM["signals-prometheus-1"]
+            C_MIG["signals-migrator-1 (One-shot, Exits 0)"]
+            C_TR["signals-training-service-1 (Profile: train)"]
+        end
+
+        subgraph VolumesPersistent ["Persistent Docker Volumes"]
+            V_PG[("pgdata")]
+            V_RD[("redisdata")]
+            V_PROM[("promdata")]
+            V_GRAF[("grafanadata")]
+        end
+    end
+
+    P3000 --> C_UI
+    P8000 --> C_GW
+    P3001 --> C_GRAF
+
+    C_DB --- V_PG
+    C_RD --- V_RD
+    C_PROM --- V_PROM
+    C_GRAF --- V_GRAF
+```

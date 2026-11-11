@@ -14,3 +14,4 @@ Tuning probability decision thresholds or meta-model confidence filters on the h
 ## Consequences
 - **Positive**: Complete elimination of threshold snooping bias; guarantees zero holdout information leakage.
 - **Negative**: Selected thresholds are more conservative, yielding fewer executed holdout trades.
+

@@ -15,3 +15,4 @@ High-frequency cryptocurrency trading incurs fixed exchange trading fees (Binanc
 ## Consequences
 - **Positive**: Protects capital from churn and fee drag; eliminates low-expectation setups.
 - **Negative**: Suppresses high-frequency trade signals on lower timeframes.
+

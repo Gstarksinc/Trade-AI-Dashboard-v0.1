@@ -14,3 +14,4 @@ High leverage and static lot sizing cause rapid portfolio ruin in volatile crypt
 ## Consequences
 - **Positive**: Strict risk bounds; zero margin race conditions across pairs; asymptotic ruin probability minimized.
 - **Negative**: Serializes concurrent risk transactions by a few milliseconds.
+

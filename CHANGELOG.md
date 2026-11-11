@@ -46,3 +46,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Initial proof-of-concept monolithic FastAPI backend with Next.js web UI.
 - Basic Binance REST kline polling and Redis Pub/Sub messaging.
 - Preliminary LightGBM classification model.
+

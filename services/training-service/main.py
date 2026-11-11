@@ -24,7 +24,7 @@ security = HTTPBearer(auto_error=False)
 
 class TrainingSettings(BaseServiceSettings):
     service_name: str = "training-service"
-    admin_api_key: str = Field(default="admin_secret_key_123", env="ADMIN_API_KEY")
+    admin_api_key: str = Field(default="admin_local_token_123", env="ADMIN_API_KEY")
 
 
 settings = TrainingSettings()

@@ -16,3 +16,4 @@ Implement a unidirectional **Server-Sent Events (SSE)** endpoint at `GET /events
 ## Consequences
 - **Positive**: Extremely simple client implementation; native browser reconnects; standard HTTP proxy compatibility.
 - **Negative**: Unidirectional only (which perfectly matches our read-only dashboard architectural policy).
+

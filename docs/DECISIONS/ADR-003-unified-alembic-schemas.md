@@ -14,3 +14,4 @@ Migrations are executed by a dedicated, one-shot `migrator` container before app
 ## Consequences
 - **Positive**: Strict domain boundary isolation in PostgreSQL; single versioned migration history; zero migration race conditions across services.
 - **Negative**: Schema changes across services must be coordinated through centralized migration scripts.
+

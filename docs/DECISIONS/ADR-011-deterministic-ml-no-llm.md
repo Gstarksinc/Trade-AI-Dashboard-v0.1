@@ -15,3 +15,4 @@ Keep the live trading and risk decision path **100% deterministic and quantitati
 ## Consequences
 - **Positive**: Sub-millisecond inference; 100% reproducible backtesting; mathematical verification via CPCV and DSR.
 - **Negative**: Excludes qualitative social media sentiment analysis (which has questionable quantitative signal value anyway).
+

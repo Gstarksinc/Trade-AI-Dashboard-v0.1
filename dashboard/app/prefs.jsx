@@ -237,8 +237,11 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
           const nowMs = Date.now();
           setLastUpdateTs(nowMs);
           setSecondsAgo(0);
+          setWsConnected(true);
         }
-      } catch {}
+      } catch {
+        if (isMounted) setWsConnected(false);
+      }
     }
 
     const interval = setInterval(pollLivePrices, 1200);
@@ -250,94 +253,10 @@ export function PrefsProvider({ rates, initialTickers = {}, children }) {
     };
   }, []);
 
-  // 3. Direct WebSocket connection to Binance Futures
+  // 3. System streaming status (Gateway / Internal API route backed)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    let isMounted = true;
-    let ws = null;
-    let reconnectTimer = null;
-
-    function connect() {
-      try {
-        ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          if (isMounted) setWsConnected(true);
-        };
-
-        ws.onmessage = (event) => {
-          if (!isMounted) return;
-          try {
-            const list = JSON.parse(event.data);
-            if (!Array.isArray(list)) return;
-
-            setLivePrices((prev) => {
-              let changed = false;
-              const next = { ...prev };
-              for (const item of list) {
-                const sym = item.s;
-                const newPrice = Number(item.c);
-                if (isNaN(newPrice)) continue;
-
-                const old = prev[sym];
-                let tickDir = null;
-                if (old && old.price) {
-                  if (newPrice > old.price) tickDir = 'up';
-                  else if (newPrice < old.price) tickDir = 'down';
-                  else tickDir = old.tickDir;
-                }
-
-                const openPrice = Number(item.o);
-                const changePct = openPrice > 0
-                  ? Number((((newPrice - openPrice) / openPrice) * 100).toFixed(2))
-                  : (old ? old.change : 0);
-
-                next[sym] = {
-                  price: newPrice,
-                  change: changePct,
-                  high: Number(item.h) || (old ? old.high : newPrice),
-                  low: Number(item.l) || (old ? old.low : newPrice),
-                  tickDir,
-                  ts: Date.now(),
-                };
-                changed = true;
-              }
-              return changed ? next : prev;
-            });
-
-            setLastUpdateTs(Date.now());
-            setSecondsAgo(0);
-          } catch {}
-        };
-
-        ws.onerror = () => {
-          if (isMounted) setWsConnected(false);
-        };
-
-        ws.onclose = () => {
-          if (isMounted) {
-            setWsConnected(false);
-            reconnectTimer = setTimeout(connect, 6000);
-          }
-        };
-      } catch {
-        if (isMounted) {
-          setWsConnected(false);
-          reconnectTimer = setTimeout(connect, 10000);
-        }
-      }
-    }
-
-    connect();
-
-    return () => {
-      isMounted = false;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (ws) {
-        try { ws.close(); } catch {}
-      }
-    };
+    // Zero browser-to-exchange direct connections; live prices are aggregated
+    // and served by internal api-gateway / market-collector routes.
   }, []);
 
   const getPrice = useCallback((symbol, fallbackPrice) => {

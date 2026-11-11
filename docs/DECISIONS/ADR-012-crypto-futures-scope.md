@@ -14,3 +14,4 @@ Constrain the immediate operational scope strictly to **Cryptocurrency Futures**
 ## Consequences
 - **Positive**: Deep specialization on perpetual futures market microstructure; simplified domain models; precise funding fee accounting.
 - **Negative**: Cannot trade spot or traditional asset classes without architectural refactoring.
+

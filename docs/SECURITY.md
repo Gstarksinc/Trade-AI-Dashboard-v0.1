@@ -77,3 +77,4 @@ if ($dash) {
   - Redis Stream consumers limit memory via `maxlen=10000` approximate trimming.
   - SSE price tick streaming is throttled to 1 tick/second per symbol.
   - Ingestion rate-limits are enforced by `RateLimitBudgeter` to prevent Binance IP bans.
+

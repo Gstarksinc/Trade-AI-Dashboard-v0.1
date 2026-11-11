@@ -46,6 +46,46 @@ The real-time live trading pipeline progresses through nine coordinated phases a
  Next.js 14 Dashboard (:3000) [Browser Client]
 ```
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant BF as "Binance Futures WS/REST"
+    participant MC as "market-collector (:8001)"
+    participant RS as "Redis Streams (:6379)"
+    participant FS as "feature-service (:8002)"
+    participant MS as "model-service (:8003)"
+    participant RK as "risk-service (:8005)"
+    participant SS as "signal-service (:8006)"
+    participant PE as "paper-exec-service (:8007)"
+    participant GW as "api-gateway (:8000)"
+    participant UI as "Next.js Dashboard (:3000)"
+
+    BF->>MC: "Candle Closes (1h/4h)"
+    MC->>RS: "XADD candle.closed"
+    RS->>FS: "XREADGROUP candle.closed"
+    FS->>RS: "XADD features.ready"
+    RS->>MS: "XREADGROUP features.ready"
+    MS->>RS: "XADD prediction.ready"
+    RS->>RK: "XREADGROUP prediction.ready"
+    Note over RK: "Acquires Advisory Lock (888888)"
+    RK->>RS: "XADD signal.approved"
+    RS->>SS: "XREADGROUP signal.approved"
+    Note over SS: "Inserts signals_ledger (waiting_for_entry v1)"
+    SS->>RS: "XADD signal.state_changed"
+    RS->>PE: "XREADGROUP signal.state_changed"
+    RS->>GW: "Subscribe signal.state_changed"
+    GW->>UI: "SSE: signal.state_changed"
+    Note over PE: "Live tick trades through limit entry Ct"
+    PE->>SS: "Transition to order_in_progress (v1 -> v2)"
+    Note over PE: "Live tick breaches Take Profit (+2.0 ATR)"
+    PE->>RS: "XADD trade.closed (target_hit)"
+    RS->>SS: "XREADGROUP trade.closed"
+    Note over SS: "Transition to target_hit (v2 -> v3)"
+    SS->>RS: "XADD signal.state_changed"
+    RS->>GW: "Subscribe signal.state_changed"
+    GW->>UI: "SSE: signal.state_changed (target_hit)"
+```
+
 ### Step 1: Market Data Ingestion (`market-collector`)
 - Maintains public WebSocket connections to Binance USD-M Futures (`wss://fstream.binance.com/ws/!miniTicker@arr`).
 - When a candle closes (e.g. `1h` or `4h`), pulls historical confirmation via Binance REST `/fapi/v1/klines`.

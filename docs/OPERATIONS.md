@@ -63,7 +63,19 @@ docker compose down
 | `REDIS_PASSWORD` | `redis_local_pass` | `redis`, all services | Redis 7 authentication password |
 | `REDIS_URL` | `redis://:redis_local_pass@redis:6379/0` | All Python microservices | Redis Streams connection string |
 | `BINANCE_FUTURES_BASE_URL` | `https://fapi.binance.com` | `market-collector`, `training` | Binance USD-M public REST endpoint |
+| `BINANCE_FAPI_URL` | `https://fapi.binance.com` | `market-collector` | Binance USD-M Futures REST URL alias |
 | `BINANCE_WS_URL` | `wss://fstream.binance.com/ws` | `market-collector` | Binance USD-M public WebSocket stream |
+| `COINGECKO_BASE_URL` | `https://api.coingecko.com/api/v3` | `dashboard` | CoinGecko API URL for optional fiat conversions |
+| `COINGECKO_API_KEY` | (Empty) | `dashboard` | Optional CoinGecko Pro API key |
+| `USDT_INR_FALLBACK` | `83.5` | `dashboard` | Fallback fiat exchange rate if external lookup fails |
+| `TELEGRAM_BOT_TOKEN` | (Empty) | `notifier-service` | Bot token for Telegram alert notifications |
+| `TELEGRAM_CHAT_ID` | (Empty) | `notifier-service` | Channel / chat ID for alert dispatch |
+| `SYMBOLS` | `BTCUSDT,ETHUSDT,...` | All services | Target 8 perpetual futures symbols |
+| `TIMEFRAMES` | `1h,4h` | All services | Active timeframe intervals (15m disabled) |
+| `BACKFILL_YEARS` | `3` | `market-collector` | Duration of historical backfill in years |
+| `UNIVERSE_SIZE` | `8` | All services | Total symbols monitored in production universe |
+| `SIM_MAX_LEVERAGE` | `3` | `risk-service` | Maximum simulated leverage ceiling |
+| `TZ` | `UTC` | All services | Global container timezone |
 | `RISK_ADVISORY_LOCK_ID` | `888888` | `risk-service` | PostgreSQL transaction advisory lock ID |
 | `DEFAULT_RISK_PER_TRADE` | `0.005` (0.5%) | `risk-service` | Fixed-fractional equity risk fraction |
 | `MAX_LEVERAGE_CAP` | `3.0` | `risk-service` | Maximum allowable effective leverage |
@@ -143,3 +155,4 @@ Restores into an isolated scratch database without disrupting live data:
    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
    ```
 3. **System Sleep Prevention**: Ensure Windows power settings do not enter system sleep during market collection or training runs.
+

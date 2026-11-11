@@ -130,3 +130,36 @@ $$\text{SR}^* = \sqrt{2 \ln(N_{\text{trials}})} \left(1 - \frac{\gamma}{\sqrt{2 
 
 - **Dynamic Trial Derivation**: $N_{\text{trials}}$ is not hardcoded. It is dynamically queried directly from the `model_registry.experiments` database table, which logs every parameter combination and threshold variant evaluated ($N_{\text{trials}} = 208+$).
 
+---
+
+## 9. Offline Machine Learning Loop Diagram (Mermaid)
+
+```mermaid
+flowchart TD
+    DB[("TimescaleDB (market_data.candles)")]
+    FEAT["Causal Feature Engine (48 indicators)"]
+    LABEL["Triple-Barrier Labeling (t+1 limit entry)"]
+    SPLIT["Holdout Split (80% Train, 20% Untouched Holdout)"]
+    CPCV["Combinatorial Purged CV (5 blocks, 10 paths)"]
+    INNER["Inner-Fold Training (LightGBM GBDT, Platt Calibration)"]
+    THRESH["Inner Threshold Optimization (prob around p*, meta)"]
+    GATES{"Promotion Gates Check (Holdout Trades >= 20, EV > 0, etc.)"}
+    REJECT["Mark Rejected (Zero models promoted)"]
+    APPROVE["Enroll Champion or Challenger"]
+    REG[("model_registry.models & experiments")]
+    SERVE["model-service (Dynamic Hot Reload)"]
+
+    DB --> FEAT
+    FEAT --> LABEL
+    LABEL --> SPLIT
+    SPLIT --> CPCV
+    CPCV --> INNER
+    INNER --> THRESH
+    THRESH --> GATES
+    GATES -->|"Failed (Empirical Truth)"| REJECT
+    GATES -->|"Passed (Alpha Discovered)"| APPROVE
+    REJECT --> REG
+    APPROVE --> REG
+    REG --> SERVE
+```
+

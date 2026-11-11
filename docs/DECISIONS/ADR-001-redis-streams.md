@@ -15,3 +15,4 @@ Adopt **Redis 7 Streams** with persistent consumer groups as the primary asynchr
 ## Consequences
 - **Positive**: Zero message loss across service restarts; independent consumer scaling; dead-letter triage.
 - **Negative**: Requires stream length trimming to prevent memory growth (managed via approximate trimming `~ 10000`).
+

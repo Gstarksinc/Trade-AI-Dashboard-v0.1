@@ -15,3 +15,4 @@ Architect the Next.js 14 dashboard as a **strictly read-only presentation client
 ## Consequences
 - **Positive**: Clean separation of concerns; zero risk of client-side order tampering; unified auditability.
 - **Negative**: User cannot execute manual discretionary trades from the dashboard UI (which aligns with our 100% automated algorithmic research scope).
+
