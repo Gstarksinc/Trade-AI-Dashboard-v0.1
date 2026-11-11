@@ -1,7 +1,20 @@
-# Phase 6.5, 6.6, 6.7 & 6.8 - Progress Tracker
+# Phase 6.5, 6.6, 6.7, 6.8 & Phase 7 - Progress Tracker
 
 **Scope**: Crypto futures paper trading & research only. Strictly no exchange private keys, no real order execution.
 **Champion & Challenger Policy**: Zero models promoted to champion. Zero models promoted to challenger. Dashboard and API gateway honestly display "No validated model".
+
+---
+
+## Phase 7 Execution Matrix (Final Documentation & End-to-End Workflow)
+
+| Batch / Group | Documents / Tasks | Status | Key Deliverables & Code Alignment | Next Step |
+| :--- | :--- | :---: | :--- | :--- |
+| **Group 1** | `README.md`, `docs/ARCHITECTURE.md`, `docs/WORKFLOW.md`, `docs/EVENTS.md`, `docs/DATA_MODEL.md`, `docs/SIGNAL_LIFECYCLE.md` | **DONE** | Complete rewrite eliminating obsolete monolithic descriptions and 5-state lifecycle. Documented 9 FastAPI microservices, TimescaleDB schemas, Redis Streams contracts matching `libs/contracts/events.py`, single-owner TP/SL exits, PostgreSQL advisory lock `888888`, and verified BTCUSDT long trade fixture. | Await "continue" for Groups 2, 3, 4 |
+| **Group 2** | `docs/ML_PIPELINE.md`, `docs/RISK_AND_EXECUTION.md`, `docs/VALIDATION_REPORT.md`, `docs/FORWARD_TEST.md`, `docs/DATA.md` | **READY** | To be executed upon user reply "continue". | Next |
+| **Group 3** | `docs/API.md`, `docs/OPERATIONS.md`, `docs/RUNBOOK.md`, `docs/OBSERVABILITY.md`, `docs/SECURITY.md`, `docs/TESTING.md` | **PENDING** | To be executed in sequence. | Pending |
+| **Group 4** | `docs/DECISIONS/ADR-*.md`, `docs/ROADMAP.md`, `CHANGELOG.md` | **PENDING** | To be executed in sequence. | Pending |
+| **Steps 3-4** | Mermaid Diagram Validation (`mmdc`) & CI Integrity Workflows | **PENDING** | Run after Group 4. | Pending |
+| **Step 5** | Verification by Execution (Protecting live DB data) | **HOLD** | Final stage; stop before and await OK. | Hold |
 
 ---
 

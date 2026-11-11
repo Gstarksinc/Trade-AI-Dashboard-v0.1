@@ -1,327 +1,187 @@
 # System Architecture & Technical Specification
 
-> **Trade AI Dashboard v0.1**  
-> High-Frequency Algorithmic Signals, Risk Management & Paper Trading Architecture
+> **Scope**: Crypto futures paper trading & research only. Strictly zero real order execution and zero exchange private keys.
+> **Project Name**: `signals` (Docker Compose project)
 
 ---
 
-## 1. High-Level System Architecture
+## 1. System Context & Overview
 
-```
-                                      ┌─────────────────────────────────────────────────────────────┐
-                                      │              BINANCE FUTURES (USD-M PERP)                   │
-                                      │   • WebSocket: wss://fstream.binance.com/ws/!miniTicker@arr │
-                                      │   • Public REST: /fapi/v1/ticker/24hr, /fapi/v1/klines      │
-                                      └──────────────────────┬──────────────────────┬───────────────┘
-                                                             │                      │
-                                           1s MiniTicker     │                      │ 15m/1h/4h OHLCV
-                                           Live Price Stream │                      │ Funding & OI
-                                                             ▼                      ▼
-┌────────────────────────────────┐         ┌─────────────────────────┐    ┌─────────────────────────┐
-│     CLIENT BROWSER             │         │   NEXT.JS DASHBOARD     │    │   DATA COLLECTOR DAEMON │
-│  • Multi-View Navigation       │◄───────►│   (Next.js 14 / SSR)    │    │   (Python / Asyncio)    │
-│  • High-Contrast Light/Dark    │         │  • Dynamic SSR & Client │    └────────────┬────────────┘
-│  • Interactive SVG Candles     │         │  • High-Freq Price API  │                 │
-│  • Local Lifecycle Cache       │         │  • Transition Proxy     │                 ▼
-└────────────────────────────────┘         └────────────┬────────────┘    ┌─────────────────────────┐
-                 ▲                                      │                 │   TIMESCALEDB (PG 16)   │
-                 │                                      │                 │  • candles (30d chunks) │
-                 │ REST (/signals, /history, /summary)  │                 │  • funding_rates        │
-                 └──────────────────────────────────────┼────────────────►│  • open_interest        │
-                                                        ▼                 │  • signals (hypertable) │
-                                           ┌─────────────────────────┐    │  • paper_trades         │
-                                           │   FASTAPI BACKEND       │    └────────────▲────────────┘
-                                           │   (Python 3.11 / Uvicorn)│                 │
-                                           │  • Signal Ingestion     │                 │
-                                           │  • Lifecycle Transition │◄────────────────┘
-                                           │  • Genuine Data Guard   │
-                                           └────────────┬────────────┘
-                                                        │
-                                                        ▼
-                                           ┌─────────────────────────┐
-                                           │   REDIS CACHE (v7)      │
-                                           │  • Pub/Sub: signals:new │
-                                           │  • Active Model Config  │
-                                           └─────────────────────────┘
-```
+The **Trade AI Dashboard** is an institutional-grade, event-driven cryptocurrency algorithmic research platform and paper trading system. The runtime environment is composed of **9 Python 3.11 FastAPI microservices**, **1 Next.js 14 Web Dashboard**, and an infrastructure layer consisting of **TimescaleDB (PostgreSQL 16)**, **Redis 7 Streams**, **Prometheus**, and **Grafana** (totaling 13 active containers in standard runtime, plus a one-shot database migrator and an on-demand training service).
+
+### High-Level Architectural Principles:
+1. **Strict Microservice Boundaries**: Each microservice owns an isolated domain schema in PostgreSQL and communicates with other services asynchronously via versioned Redis Streams or synchronously via internal HTTP.
+2. **Server-Authoritative Lifecycle**: The Next.js dashboard is strictly a **read-only client**. It connects exclusively to the `api-gateway` via REST queries and multiplexed Server-Sent Events (SSE). Client browsers never communicate with external exchanges and cannot mutate trade or signal state.
+3. **Idempotence & Concurrency Control**: Every event contains an `idempotency_key` and is tracked in a database outbox. Signal state transitions are guarded by database-level **optimistic concurrency control** (`version` column increment). Portfolio exposure calculations and signal approvals are strictly serialized through a PostgreSQL transaction-level advisory lock (`RISK_ADVISORY_LOCK_ID = 888888`).
+4. **Single-Owner Position Exits**: `paper-exec-service` is the sole owner of live position lifecycle and TP/SL barrier exits on price ticks (conservative **SL-first rule**). `signal-service` listens to `trade.closed` events to synchronize the signal ledger, eliminating duplicate tick evaluation across microservices.
 
 ---
 
-## 2. Complete End-to-End Mermaid Workflow
+## 2. System Context Diagram (Mermaid)
 
 ```mermaid
 flowchart TD
-    subgraph DataIngestion ["1. Real-Time Data Ingestion"]
-        BF[Binance Futures REST & WebSocket]
-        COL[Collector Daemon]
-        TS[(TimescaleDB Candles & Funding)]
-        BF -->|Raw Klines & Tickers| COL
-        COL -->|Normalized Hypertables| TS
+    subgraph External ["External Market Infrastructure"]
+        BF["Binance USD-M Futures (Public WebSocket & REST)"]
     end
 
-    subgraph FeatureML ["2. Quantitative Feature Pipeline & Modeling"]
-        FEAT[Technical Analysis & Feature Builder]
-        LGBM[Stage 1: Calibrated LightGBM Classifier]
-        META[Stage 2: Random Forest Meta-Labeling Filter]
-        RISK[Adaptive Risk Engine ATR Sizing & Correlation]
-        TS --> FEAT
-        FEAT --> LGBM
-        LGBM -->|P >= 0.55| META
-        META -->|Meta Score >= 0.60| RISK
+    subgraph IngestionFeature ["Data Ingestion & Feature Pipeline"]
+        MC["market-collector (:8001)"]
+        FS["feature-service (:8002)"]
     end
 
-    subgraph SignalLifecycle ["3. Signal State Machine & Paper Trading"]
-        SIG[(signals table)]
-        PAPER[(paper_trades table)]
-        RISK -->|Approved Signal 'open'| SIG
-        SIG -->|Limit Trigger| PIP[Order in Progress]
-        PIP -->|Take Profit Hit| WIN[Win — Target Hit]
-        PIP -->|Stop Loss Hit| LOSS[Loss — Stop Loss Hit]
-        PIP -.->|opened_at recorded| PAPER
-        WIN -.->|closed_at & exit_price| PAPER
-        LOSS -.->|closed_at & exit_price| PAPER
+    subgraph QuantitativeCore ["Quantitative & ML Services"]
+        MS["model-service (:8003)"]
+        TS["training-service (:8004) [profile: train]"]
     end
 
-    subgraph APILayer ["4. API & Real-Time Distribution"]
-        API[FastAPI Backend :8000]
-        TRANS[/signals/transition Endpoint]
-        REDIS[(Redis 7 Pub/Sub)]
-        SIG --> API
-        PAPER --> API
-        RISK -->|Publish signals:new| REDIS
-        WIN --> TRANS
-        LOSS --> TRANS
-        TRANS -->|Idempotent Update| SIG
-        TRANS -->|Idempotent Record| PAPER
+    subgraph RiskExecutionLedger ["Risk, Execution & Signal Ledger"]
+        RS["risk-service (:8005)"]
+        SS["signal-service (:8006)"]
+        PE["paper-exec-service (:8007)"]
+        NS["notifier-service (:8009)"]
     end
 
-    subgraph Presentation ["5. High-Frequency Frontend Dashboard"]
-        DASH[Next.js 14 Dashboard :3000]
-        TAPE[Ticker Tape & Watchlist]
-        CHART[SVG Candlestick Chart]
-        HIST[Performance & Trade History]
-        WS[Direct MiniTicker WS Stream]
-        API --> DASH
-        WS --> TAPE
-        TRANS -.-> DASH
-        DASH --> CHART
-        DASH --> HIST
+    subgraph GatewayPresentation ["API Gateway & Presentation Layer"]
+        GW["api-gateway (:8000)"]
+        UI["Next.js 14 Dashboard (:3000)"]
     end
+
+    subgraph StorageInfra ["Storage & Message Bus"]
+        DB[("TimescaleDB (PostgreSQL 16) (:5432)")]
+        RD[("Redis 7 Streams (:6379)")]
+    end
+
+    BF -->|"Public Kline & Ticker Streams"| MC
+    MC -->|"Stream: candle.closed, price.tick"| RD
+    RD -->|"Consume candle.closed"| FS
+    FS -->|"Stream: features.ready"| RD
+    RD -->|"Consume features.ready"| MS
+    MS -->|"Stream: prediction.ready"| RD
+    RD -->|"Consume prediction.ready"| RS
+    RS -->|"Stream: signal.approved, signal.rejected"| RD
+    RD -->|"Consume signal.approved"| SS
+    SS -->|"Stream: signal.state_changed"| RD
+    RD -->|"Consume signal.state_changed"| PE
+    PE -->|"Stream: trade.closed"| RD
+    RD -->|"Consume trade.closed"| SS
+    RD -->|"Consume signal.approved, trade.closed"| NS
+
+    MC --- DB
+    FS --- DB
+    MS --- DB
+    RS --- DB
+    SS --- DB
+    PE --- DB
+    GW --- DB
+
+    GW -->|"Proxy REST & Subscribe Streams"| RD
+    GW -->|"Internal HTTP"| SS
+    GW -->|"Internal HTTP"| PE
+    UI -->|"REST & SSE (/events/stream)"| GW
 ```
 
 ---
 
-## 3. Core Component Architecture
+## 3. Microservice Inventory & Specifications
 
-### 3.1 Market Ingestion Layer (Binance USD-M Perpetuals)
-- **Primary Source**: Binance USD-M Futures public REST API (`https://fapi.binance.com`) and direct WebSocket streams (`wss://fstream.binance.com/ws/!miniTicker@arr`).
-- **Monitored Pairs (8 Core Perpetuals)**:
-  - `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `XRPUSDT`, `DOGEUSDT`, `LINKUSDT`, `TRXUSDT`.
-- **Ingestion Timeframes**:
-  - `15m` (Tactical momentum entries)
-  - `1h` (Trend continuation & swing setups)
-  - `4h` (Macro regime & multi-day structure)
-- **Hypertables Captured**:
-  - `candles`: Open, High, Low, Close, Volume, Quote Volume, Trades, Taker Buy Base Volume. Compressed after 30 days.
-  - `funding_rates`: 8-hour funding rates and mark price baselines.
-  - `open_interest` & `taker_volume`: Aggregated derivative participation metrics.
+| Service | Port | Host Bind | Owned Schema | Database Tables Owned | Produced Events | Consumed Events / Dependencies | Compose Profile |
+| :--- | :---: | :---: | :--- | :--- | :--- | :--- | :---: |
+| **`market-collector`** | `8001` | `127.0.0.1:8001` | `market_data` | `candles`, `funding_rates`, `open_interest`, `taker_volume`, `symbols` | `candle.closed`, `price.tick` | Binance USD-M Public WS & REST | Default |
+| **`feature-service`** | `8002` | `127.0.0.1:8002` | `feature_store` | `features` | `features.ready` | `candle.closed` (Group: `feature-service-group`) | Default |
+| **`model-service`** | `8003` | `127.0.0.1:8003` | `model_registry` | `shadow_predictions`, `drift_reports` | `prediction.ready` | `features.ready` (Group: `model-service-group`) | Default |
+| **`training-service`** | `8004` | `127.0.0.1:8004` | `model_registry` | `models`, `experiments` | None (Offline Model Registry) | DB Historical Hypertables | `train` |
+| **`risk-service`** | `8005` | `127.0.0.1:8005` | Shared / Advisory | Postgres advisory lock `888888` | `signal.approved`, `signal.rejected` | `prediction.ready` (Group: `risk-service-group`) | Default |
+| **`signal-service`** | `8006` | `127.0.0.1:8006` | `signals_ledger` | `signals` | `signal.state_changed` | `signal.approved`, `trade.closed` (Group: `signal-service-group`) | Default |
+| **`paper-exec-service`** | `8007` | `127.0.0.1:8007` | `paper_execution` | `paper_trades` | `trade.closed` | `signal.state_changed`, `price.tick` (Group: `paper-exec-group`) | Default |
+| **`api-gateway`** | `8000` | `0.0.0.0:8000` | `outbox` | `events` (read-only outbox monitor) | None (SSE Multiplexer) | REST to internal services; Redis Streams | Default |
+| **`notifier-service`** | `8009` | `127.0.0.1:8009` | None | Stateless | External Webhooks (Discord/Telegram) | `signal.approved`, `trade.closed` (Group: `notifier-service-group`) | Default |
+| **`dashboard`** | `3000` | `0.0.0.0:3000` | None | Read-only UI Client | None | HTTP / SSE to `api-gateway:8000` | Default |
+| **`migrator`** | — | None | All | All schemas & Alembic metadata | None (Exits `0`) | PostgreSQL `db:5432` | Default |
 
-### 3.2 Quantitative ML & Meta-Labeling Architecture
-- **Primary Predictor (Stage 1)**:
-  - Multi-feature LightGBM gradient-boosted decision trees trained with triple-barrier event labeling (ATR-based Take Profit, Stop Loss, and time expiration limits).
-  - Platt / Isotonic probability calibration to map raw tree margins into true empirical probabilities.
-  - Entry gate: Requires probability $P \ge 0.55$.
-- **Meta-Labeling Filter (Stage 2)**:
-  - Secondary classification layer based on Marcos López de Prado's meta-labeling methodology.
-  - Filters out false breakouts by predicting whether the primary model's position will hit target before stop loss.
-  - Eliminates model bias without altering the primary direction.
-- **Strict Anti-Leakage Protocol**:
-  - Purged and embargoed walk-forward cross-validation.
-  - All features calculated strictly on completed historical candle boundaries (`open_time`). No future data is accessible.
+---
 
-### 3.3 Risk Management Engine
-- **ATR Dynamic Volatility Stops** (Unified across `libs/common/risk_rules.py`, `risk-service`, `training-service`, and `paper-exec-service`):
-  - Long Stop Loss: $\text{Entry} - (1.0 \times \text{ATR}_{14})$
-  - Long Take Profit: $\text{Entry} + (2.0 \times \text{ATR}_{14})$
-  - Short Stop Loss: $\text{Entry} + (1.0 \times \text{ATR}_{14})$
-  - Short Take Profit: $\text{Entry} - (2.0 \times \text{ATR}_{14})$
-  - Minimum Risk-to-Reward ratio: $1 : 2.0$ (`pt_multiplier=2.0`, `sl_multiplier=1.0`). Live production value is strictly $2.0\times$.
-- **Capital Protection & Leverage Constraints**:
-  - Maximum leverage cap: $3.0\times$.
-  - Maximum correlated positions: 3 open positions simultaneously.
-  - Daily loss limit: $3.0\%$ of virtual capital (halts new setup generation if breached).
-  - Simulated margin per trade: \$500 margin (\$1,500 notional at 3x).
+## 4. Database Architecture & Schema Isolation
 
-### 3.4 Signal Lifecycle State Machine & Idempotent Persistence
-The dashboard enforces 5 distinct states in strict chronological order:
+TimescaleDB runs as PostgreSQL 16 with the TimescaleDB extension enabled. Domain boundaries are enforced at the PostgreSQL schema level:
 
 ```
-[1. Waiting for confirmation]
-       │
-       ▼ (Model confirms breakout P >= 0.55 + Meta Gate)
-[2. Waiting for entry]
-       │
-       ▼ (Market CMP touches Expected Entry price)
-[3. Order in progress]
-       │
-       ├─────────────────────────────────────────┐
-       ▼ (Market CMP touches TP)                 ▼ (Market CMP touches SL)
-[4. Win — Target hit]                     [5. Loss — Stop loss hit]
-       │                                         │
-       └────────────────────┬────────────────────┘
-                            │
-                            ▼
-              [POST /signals/transition]
-              • Idempotent DB Write: signals.status = 'target_hit' | 'stop_hit'
-              • paper_trades closed_at & exit_price committed
-              • Signal moved from Active Signals to Performance & Trade History
+trade_ai (PostgreSQL 16 + TimescaleDB)
+├── market_data        # Owned by market-collector
+│   ├── symbols
+│   ├── candles (Hypertable: 30-day chunks, compressed)
+│   ├── funding_rates (Hypertable: 90-day chunks)
+│   ├── open_interest (Hypertable: 30-day chunks)
+│   └── taker_volume (Hypertable: 30-day chunks)
+├── feature_store      # Owned by feature-service
+│   └── features (Hypertable: 30-day chunks)
+├── model_registry     # Owned by training-service & model-service
+│   ├── models (Champion / Challenger / Retired metadata & metrics)
+│   ├── experiments (Complete trial count registry for dynamic DSR)
+│   ├── shadow_predictions (Shadow model out-of-sample audit log)
+│   └── drift_reports (PSI / Wasserstein distribution drift logs)
+├── signals_ledger     # Owned by signal-service
+│   └── signals (Server-authoritative state machine with optimistic locking)
+├── paper_execution    # Owned by paper-exec-service
+│   └── paper_trades (Simulated fills, fees, funding accruals, PnL)
+└── outbox             # Transactional Outbox pattern
+    └── events (Deduplication keys, publishing status)
 ```
 
-1. **`Waiting for confirmation`**:
-   - Displayed for tracked coins where no genuine active setup currently meets quantitative confirmation criteria.
-   - All levels (`entry`, `stop_loss`, `take_profit`, `rr`) display `—` honestly.
-2. **`Waiting for entry`**:
-   - Confirmed signal approved by Risk Engine, but current market price has not yet reached the entry price.
-3. **`Order in progress`**:
-   - Entry price reached. The paper trade is opened and timestamped with `opened_at`.
-   - Normal market fluctuations between entry and SL/TP remain in `Order in progress`.
-4. **`Win — Target hit`**:
-   - Current market price reaches the Take Profit target.
-   - Logged with `closed_at`, `exit_price = take_profit`, `exit_reason = 'Target Hit'`.
-5. **`Loss — Stop loss hit`**:
-   - Current market price reaches the Stop Loss limit.
-   - Logged with `closed_at`, `exit_price = stop_loss`, `exit_reason = 'Stop Loss Hit'`.
+### Roles and Database Credentials
+- Default user: `postgres` / `postgres` (configurable via `POSTGRES_USER` and `POSTGRES_PASSWORD`).
+- Host port binding: `127.0.0.1:5432` (restricted to localhost; external network access is blocked).
+- Migrations: Single, unified Alembic runner (`libs/database/migrations/env.py`) invoked via the `migrator` container before application services start up.
 
 ---
 
-## 4. API Endpoints & Data Contracts
+## 5. Messaging & Event Bus (Redis 7 Streams)
 
-All endpoints are hosted by FastAPI on `:8000` and proxied or queried by Next.js on `:3000`.
+Inter-service communication utilizes **Redis 7 Streams** with persistent consumer groups. Unlike raw Redis Pub/Sub, Redis Streams provide guaranteed delivery, message persistence, explicit consumer group acknowledgements (`XACK`), and retry handling with Dead-Letter Queuing.
 
-### `GET /health`
-- **Purpose**: System health monitoring for API, Database, and Redis connections.
-- **Response**:
-  ```json
-  { "api": "ok", "db": "ok", "redis": "ok" }
-  ```
-
-### `GET /signals?limit=25&active_only=true`
-- **Purpose**: Retrieves genuine active predictive signals from the `signals` table.
-- **Contract**:
-  - Filters `WHERE s.status IN ('open', 'in_progress')`.
-  - Returns `[]` honestly when no genuine active signals exist (strictly no fallback/sample signals).
-  - Response object contains `id`, `symbol`, `timeframe`, `direction`, `entry`, `stop_loss`, `take_profit`, `probability`, `meta_probability`, `current_price`, `opened_at`, `is_fallback: false`.
-
-### `POST /signals/transition`
-- **Purpose**: Idempotently commits signal lifecycle transitions and records trade history into PostgreSQL.
-- **Request Body**:
-  ```json
-  {
-    "signal_id": 105,
-    "status": "target_hit",
-    "opened_at": "2026-11-09T18:00:00Z",
-    "closed_at": "2026-11-09T19:35:15Z",
-    "exit_price": 76000.0,
-    "pnl_pct": 2.70,
-    "exit_reason": "Target Hit",
-    "symbol": "BTCUSDT",
-    "direction": "long",
-    "entry": 74000.0
-  }
-  ```
-- **Behavior**:
-  - Updates `signals SET status = %s WHERE id = %s`.
-  - Updates existing open trade in `paper_trades` with `closed_at`, `exit_price`, and `pnl_pct`.
-  - If already closed, ignores duplicate requests to guarantee that history is never duplicated.
-
-### `GET /history?days=30`
-- **Purpose**: Retrieves completed paper trades where target or stop loss has been reached.
-- **Contract**:
-  - Enforces `WHERE p.closed_at IS NOT NULL`.
-  - Joins `signals` on `s.id = p.signal_id` to preserve original `predicted_at` (`s.created_at`) and `timeframe`.
-  - Never filters out losing trades.
-
-### `GET /summary`
-- **Purpose**: Provides aggregate performance KPIs for the dashboard header cards.
-- **Contract**:
-  - Returns genuine `open_signals` count, `symbols_scanned`, `win_rate_30d`, `closed_30d`, `net_pnl_30d`, `max_drawdown`.
-  - If `closed_30d == 0`, returns `win_rate_30d: 0.0` (zero fake fallbacks).
-
-### `GET /equity?days=30`
-- **Purpose**: Returns cumulative equity curve derived from closed paper trade outcomes.
-- **Contract**:
-  - Returns array of `{ "ts": string, "equity": number }` starting from 100.0 base. Returns `[]` if no closed trades exist.
+### Event Streaming Architecture:
+1. **Envelope Contract**: Every event inherits from `BaseEvent` (`libs/contracts/events.py`):
+   - `event_id`: Unique UUID4 identifier.
+   - `event_type`: Dot-separated event classifier (e.g., `candle.closed`).
+   - `event_version`: Semantic schema version (`"1.0"`).
+   - `idempotency_key`: Deterministic unique deduplication key.
+   - `timestamp`: ISO-8601 UTC timestamp.
+   - `producer`: Service generating the event.
+   - `payload`: Strongly typed Pydantic V2 model.
+2. **Stream Trimming**: Streams are bounded using Redis approximate trimming (`maxlen=10000`) to prevent memory exhaustion.
+3. **Consumer Groups**: Each downstream service registers its own named consumer group (`xgroup_create(stream, group_name, id="$", mkstream=True)`), ensuring that scaling instances share work without duplicate processing.
+4. **Dead-Letter Queue (`system.dlq`)**: If a message fails processing after retry attempts, it is routed to the `system.dlq` stream with full error diagnostic metadata (`failed_service`, `original_stream`, `error_type`, `error_message`, `raw_payload`, `retry_count`).
 
 ---
 
-## 5. Frontend Dashboard Architecture (Next.js 14)
+## 6. Concurrency, Sizing & Locking Model
 
-### 5.1 Multi-View Navigation Router
-The dashboard features an integrated top navigation bar supporting 7 dedicated application views:
-1. **Overview View**: Paper trading portfolio summary, dual status alert strip, 4 KPI hero cards, market highlights, active signals preview, and equity curve.
-2. **Markets View**: Searchable, sortable futures watchlist for the 8 monitored perpetuals with live 24h ticker cards, mark prices, funding rates, and 24h volumes.
-3. **Signals View**: Full active signals table/cards with live trade level visualizer, expected entries, stops, targets, R:R badges, and status filters.
-4. **Positions View**: Dedicated open positions tracker showing unrealized P&L in USDT and percentage, margin allocation, leverage, liquidation distance, and simulated exit action.
-5. **Trade History View**: Complete performance ledger with trade duration, elapsed time to target, prediction timestamps, win rate analytics, and pagination.
-6. **Candlestick Chart View**: Pure SVG interactive candlestick chart with timeframe controls (15m, 1h, 4h, 1D), volume histogram, 20/50 EMAs, Entry/SL/TP/CMP overlays, and crosshair inspection.
-7. **Backtest & Model View**: Machine learning pipeline architecture, feature importance, confidence distribution, infrastructure health grid, and walk-forward verification.
-
-### 5.2 Real-Time Dual Status Architecture
-- **Market Price Feed Status**: Directly tracks the Binance WebSocket stream / REST polling connection with millisecond precision and tick directions (`tick-up`, `tick-down`).
-- **Signal Collector Status**: Evaluates the freshness of the latest hypertable candle (`last_candle_age_min <= 20 min` = Active & Ingesting; `> 20 min` = Collector Waiting).
-
-### 5.3 Theme & Accessibility Architecture
-- High-contrast CSS variable tokens supporting instant toggle between **Dark Mode** and **Light Mode** (WCAG AA compliant contrast ratios).
-- Text/icon pairings on all metrics (`▲ LONG`, `▼ SHORT`, `✓ Win — Target hit`, `✕ Loss — Stop loss hit`) ensuring no state relies on color alone.
-
----
-
-## 6. Database Schema Specifications
-
-### `signals` (Hypertable on `created_at`)
+### Optimistic Concurrency Control (Signal Ledger)
+Signal state updates are protected against race conditions using a strict `version` counter:
 ```sql
-CREATE TABLE signals (
-  id               bigserial PRIMARY KEY,
-  created_at       timestamptz NOT NULL DEFAULT now(),
-  symbol           text NOT NULL,
-  timeframe        text NOT NULL,
-  direction        text NOT NULL,
-  probability      double precision,
-  meta_probability double precision,
-  entry            double precision,
-  stop_loss        double precision,
-  take_profit      double precision,
-  atr              double precision,
-  model_version    text,
-  status           text DEFAULT 'open',
-  features         jsonb
-);
-CREATE INDEX ON signals (symbol, created_at DESC);
+UPDATE signals_ledger.signals
+SET status = :new_status,
+    version = version + 1
+WHERE id = :signal_id AND version = :current_version
+RETURNING version;
 ```
+If two processes attempt to mutate the same signal concurrently, only the process possessing the current version succeeds; the second receives zero rows affected and rejects the transition.
 
-### `paper_trades`
+### Transactional Advisory Lock (Risk Service)
+To prevent race conditions during portfolio margin allocation and concurrent signal approvals across multiple trading pairs, `risk-service` acquires a PostgreSQL transaction-level advisory lock (`RISK_ADVISORY_LOCK_ID = 888888`):
 ```sql
-CREATE TABLE paper_trades (
-  id          bigserial PRIMARY KEY,
-  signal_id   bigint REFERENCES signals(id),
-  opened_at   timestamptz NOT NULL,
-  closed_at   timestamptz,
-  symbol      text NOT NULL,
-  direction   text NOT NULL,
-  entry       double precision,
-  exit_price  double precision,
-  leverage    double precision,
-  fees        double precision,
-  funding     double precision,
-  pnl_pct     double precision,
-  exit_reason text
-);
+SELECT pg_advisory_xact_lock(:lock_id);
 ```
+This guarantees that portfolio risk checks, cluster exposure limits, and capital reservations execute atomically across the cluster. The lock is automatically released upon transaction commit or rollback.
 
 ---
 
-## 7. Security & Operational Boundaries
+## 7. Presentation & API Gateway Architecture
 
-1. **Port Bindings**: All internal services (`5432` PostgreSQL, `6379` Redis, `8000` FastAPI) bind to `127.0.0.1` inside Docker networks. External access is routed through authenticated reverse proxy or SSH tunnels.
-2. **Zero Order Execution**: The system is engineered strictly for predictive research, quantitative validation, and paper trading. No order placement or exchange API private keys are permitted in execution paths.
-3. **Data Integrity**: Genuine signals only. Mock, synthetic, or fallback signals are never substituted for real market setups.
+The client dashboard is a **Next.js 14** application operating in server-side rendered (SSR) and client-hydrated modes.
+
+### Strict Read-Only Policy:
+- **No Exchange Access**: The browser does not connect to Binance or third-party crypto APIs (optional CoinGecko fallback for fiat currency display only).
+- **No Direct Service Calls**: The dashboard connects solely to `api-gateway:8000`.
+- **No State Mutations**: The dashboard does not compute or publish signal transitions. Earlier legacy proxy routes (`/api/signals/transition`) were completely excised.
+- **Multiplexed SSE Stream**: The gateway provides an active Server-Sent Events endpoint (`GET /events/stream`) delivering real-time price updates (throttled to 1/s/symbol) and signal lifecycle events with `Last-Event-ID` reconnection replay and 15-second keep-alive heartbeats (`: heartbeat\n\n`).
