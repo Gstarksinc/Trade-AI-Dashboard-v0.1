@@ -39,6 +39,7 @@ class UnifiedThresholdConfig:
     min_trades_inner: int = 15         # Minimum trades required in inner fold
     min_trades_holdout: int = 20       # Minimum trades required on holdout
     max_ece: float = 0.12              # ECE promotion ceiling
+    enable_meta_model: bool = DEFAULT_BARRIER_CONFIG.enable_meta_model # Enable/disable secondary meta gate
 
 
 def compute_per_setup_breakeven_p_star(
@@ -439,6 +440,7 @@ def run_unified_evaluation(
     holdout_funding_fallback_flags: Optional[np.ndarray] = None,
     min_holdout_trades: int = 20,
     max_ece: float = 0.12,
+    enable_meta_model: bool = True,
 ) -> Dict[str, any]:
     """
     ONE UNIFIED EVALUATION FUNCTION across Funnel Diagnostics, Batch Runner, and Leakage Audit.
@@ -451,7 +453,10 @@ def run_unified_evaluation(
     prob_gate_mask = holdout_primary_probs[:candidate_bars] >= prob_threshold
     prob_gate_passed = int(np.sum(prob_gate_mask))
 
-    meta_gate_mask = prob_gate_mask & (holdout_meta_probs[:candidate_bars] >= meta_threshold)
+    if enable_meta_model:
+        meta_gate_mask = prob_gate_mask & (holdout_meta_probs[:candidate_bars] >= meta_threshold)
+    else:
+        meta_gate_mask = prob_gate_mask
     meta_gate_passed = int(np.sum(meta_gate_mask))
 
     cost_gate_mask = meta_gate_mask & holdout_cost_gate_flags[:candidate_bars]

@@ -15,6 +15,7 @@ class BarrierMultiplesConfig:
     sl_multiplier: float = 1.0       # Stop loss multiple of ATR (1.0x)
     default_friction: float = 0.0014 # 14 bps round-trip friction (2x 5 bps fee + 2x 2 bps slippage)
     max_cost_to_risk_ratio: float = 0.25 # 25% max friction-to-stop ratio
+    enable_meta_model: bool = True # Flag to enable/disable secondary meta-label filter
 
 
 DEFAULT_BARRIER_CONFIG = BarrierMultiplesConfig()
