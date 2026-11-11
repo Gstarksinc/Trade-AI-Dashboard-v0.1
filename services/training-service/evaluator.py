@@ -89,7 +89,8 @@ def get_dsr_trial_count(
     default_trials: int = 208,
 ) -> Tuple[int, str]:
     """
-    Returns DSR trial count dynamically derived from docs/EXPERIMENTS.md registry.
+    Returns DSR trial count dynamically queried from model_registry.experiments DB table,
+    falling back to docs/EXPERIMENTS.md registry.
     Configurable via DSR_TRIALS environment variable.
     """
     env_val = os.getenv("DSR_TRIALS")
@@ -102,7 +103,42 @@ def get_dsr_trial_count(
         except ValueError:
             pass
 
-    # Check for docs/EXPERIMENTS.md in standard paths
+    # 1. Query database table model_registry.experiments if accessible
+    try:
+        import asyncio
+        import asyncpg
+        import concurrent.futures
+
+        async def _fetch_db_count():
+            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/trade_ai")
+            clean_url = db_url.replace("+asyncpg", "").replace("postgresql+psycopg2://", "postgresql://")
+            conn = await asyncpg.connect(clean_url, timeout=3.0)
+            try:
+                val = await conn.fetchval("SELECT COUNT(*) FROM model_registry.experiments")
+                return val
+            finally:
+                await conn.close()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                cnt = pool.submit(lambda: asyncio.run(_fetch_db_count())).result(timeout=3.5)
+        else:
+            cnt = asyncio.run(_fetch_db_count())
+
+        if cnt and cnt > 0:
+            trials = int(cnt)
+            derivation = f"Dynamically queried from model_registry.experiments DB table: {trials} total registered trials"
+            log.info(derivation)
+            return trials, derivation
+    except Exception as e:
+        log.debug("DB trial count lookup fallback: %s", e)
+
+    # 2. Check for docs/EXPERIMENTS.md in standard paths
     for p in [Path(experiments_file), Path("../../" + experiments_file), Path("/app/" + experiments_file)]:
         if p.exists():
             try:

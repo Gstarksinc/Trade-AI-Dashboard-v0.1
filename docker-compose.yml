@@ -65,6 +65,8 @@ services:
       dockerfile: libs/database/Dockerfile
     restart: 'no'
     env_file: .env
+    volumes:
+      - ./libs:/app/libs
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-trade_ai}
     depends_on:

@@ -429,6 +429,43 @@ class ModelTrainer:
         with open(v_dir / "metrics.json", "w") as f:
             json.dump(metrics_payload, f, indent=2)
 
+        # Phase 6.8 Item 10: Automatically log experiment trial to database
+        try:
+            import asyncio
+            try:
+                from .sync_experiments import log_experiment_to_db, generate_experiments_md_from_db
+            except (ImportError, ValueError):
+                from sync_experiments import log_experiment_to_db, generate_experiments_md_from_db
+
+            async def _persist_exp():
+                await log_experiment_to_db(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    model_name=version,
+                    prob_thresh=best_p,
+                    meta_thresh=best_m,
+                    holdout_trades=tp["executed_trades"],
+                    holdout_net_ev_pct=tp["net_ev_pct"],
+                    holdout_sharpe=sh_audit["annualized_trade_sharpe"],
+                    pbo=of_out["pbo"],
+                    dsr=of_out["dsr"],
+                    status="Promoted" if promotion_approved else "Evaluated",
+                    notes="Phase 3.1 automated pipeline evaluation",
+                )
+                await generate_experiments_md_from_db()
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                asyncio.create_task(_persist_exp())
+            else:
+                asyncio.run(_persist_exp())
+        except Exception as e:
+            log.warning("Could not auto-log experiment to DB: %s", e)
+
         return {
             "version": version,
             "artifact_path": str(v_dir),

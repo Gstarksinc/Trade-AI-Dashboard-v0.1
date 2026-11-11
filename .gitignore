@@ -6,3 +6,5 @@ __pycache__/
 node_modules/
 .next/
 models/artifacts/
+artifacts/
+services/training-service/artifacts/
