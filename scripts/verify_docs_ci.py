@@ -68,12 +68,14 @@ def check_no_private_keys_or_execution():
     print("PASS: Zero real order execution code found in services")
 
     # 3. Dashboard has no direct exchange connections or mock data
-    for f in Path("dashboard/app").rglob("*.js*"):
+    for f in Path("dashboard").rglob("*.js*"):
+        if ".next" in f.parts or "node_modules" in f.parts:
+            continue
         text = f.read_text(encoding="utf-8", errors="ignore")
         if "binance.com" in text:
             print(f"FAIL: Detected direct Binance URLs in dashboard file {f}")
             return False
-    print("PASS: Zero direct Binance URLs in dashboard/app/")
+    print("PASS: Zero direct Binance URLs in dashboard/ (source files)")
     return True
 
 

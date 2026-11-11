@@ -1,5 +1,5 @@
 const API = process.env.API_URL || 'http://api:8000';
-const BINANCE_FAPI = process.env.BINANCE_FAPI_URL || 'https://fapi.binance.com';
+const BINANCE_FAPI = process.env.BINANCE_FAPI_URL || '';
 
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
 
