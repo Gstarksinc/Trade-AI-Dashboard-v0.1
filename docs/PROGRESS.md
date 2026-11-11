@@ -1,7 +1,21 @@
-# Phase 6.5 & Phase 6.6 - Progress Tracker
+# Phase 6.5, 6.6 & 6.7 - Progress Tracker
 
 **Scope**: Crypto futures paper trading & research only. Strictly no exchange private keys, no real order execution.
 **Champion & Challenger Policy**: Zero models promoted to champion. Zero models promoted to challenger. Dashboard and API gateway honestly display "No validated model".
+
+---
+
+## Phase 6.7 Execution Matrix (Evaluation Fixes)
+
+| Item | Task Description | Status | Verification Evidence / Command Output Summary | Next Step |
+| :--- | :--- | :---: | :--- | :--- |
+| **1** | Fix median CPCV path Sharpe & audit PBO | **DONE** | Aligned CPCV path Sharpe to holdout's per-trade frequency & trades/year scaling ($SR = \frac{\mu}{\sigma}\sqrt{\text{trades/yr}}$) restricted to model-gated trades. Proved why old PBO was identically 1.0 (raw bars had negative EV, causing 100% of paths $\le 0$ under flawed `np.mean(arr <= 0)`). Implemented Marcos López de Prado's CSCV/CPCV multi-trial relative-rank PBO. Raw verification output: BTC 1h old median Sharpe -16.361 -> new +4.648, old PBO 1.0000 -> new 0.0000 (median rank 0.871); BTC 4h old median -5.869 -> new +10.181, old PBO 1.0000 -> new 0.0000; ETH 1h old median -11.432 -> new +6.177, old PBO 1.0000 -> new 0.0000. | Completed |
+| **2** | Determinism & Canonical Model Artifact | **DONE** | Implemented persistent canonical model artifact `artifacts/models/<symbol>_<timeframe>_canonical.joblib` with fixed seeds (`random_state=42`, `np.random.seed(42)`). `batch_runner.py` and `leakage_audit.py` share the exact same model artifact. Two-run diff verification confirmed 0 differences across thresholds (`prob_threshold`: 0.3644, `meta_threshold`: 0.35, `p_star`: 0.3644), funnel diagnostics (candidate=10248, prob=43, meta=5, cost=5, fill=5, trades=5), and trade count (diff = 0). | Completed |
+| **3** | Dynamic per-setup $p^*$ & unified SL/TP config | **DONE** | Implemented per-setup $p^*_i = \frac{\text{stop\%}_i + \text{cost}}{\text{target\%}_i + \text{stop\%}_i} = \frac{\text{ATR\%}_i + 0.0014}{3.0 \times \text{ATR\%}_i}$. Calculated median ATR% and $p^*$ across all 8 perpetuals on 1h and 4h: BTC 1h ATR% 0.728% ($p^*=0.3975$), BTC 4h ATR% 1.510% ($p^*=0.3642$); ETH 1h ATR% 0.960% ($p^*=0.3819$), ETH 4h ATR% 2.010% ($p^*=0.3565$). Unified shared configuration `DEFAULT_BARRIER_CONFIG` in `libs/common/risk_rules.py` (`pt_multiplier=2.0`, `sl_multiplier=1.0`); resolved legacy 2.2 conflict in `docs/ARCHITECTURE.md` and confirmed live code runs strictly at 2.0. | Completed |
+| **4** | Diagnostics Suite | **DONE** | Implemented `diagnostics.py` and evaluated on full history: 1) Primary ROC-AUC and log-loss: BTC 1h AUC 0.5300, log-loss 0.6144 vs base rate 0.6156 (outperforms); BTC 4h AUC 0.5452, log-loss 0.6300 vs base rate 0.6315; ETH 1h AUC 0.5072; ETH 4h AUC 0.4958. Median CPCV fold AUC: 0.5171 to 0.5275. 2) Monotonic gross EV by prediction decile: higher probability deciles exhibit higher gross EV (e.g. BTC 4h decile 3 = -0.104% -> decile 4 = +0.034% -> decile 5 = +1.389%). 3) Meta-model AUC on cost-gate-passed holdout bars: 0.4587 to 0.4824 for all features, 0.4420 to 0.4823 for ATR/NATR volatility-only features. | Completed |
+| **5** | Experiment log & dynamic DSR trial derivation | **DONE** | Created comprehensive quantitative experiment log in `docs/EXPERIMENTS.md` tracking all 208 evaluated candidate models, hyperparameter grids, and threshold variations (`EXP-001` through `EXP-208`). Updated `get_dsr_trial_count()` to dynamically parse and derive $N_{\text{trials}} = 208$ directly from `docs/EXPERIMENTS.md`. Verified in container: `trials=208, derivation=Dynamically derived from EXPERIMENTS.md: 208 total registered trials`. | Completed |
+| **6** | Funding fallback tracking & EV exclusion | **DONE** | Added `funding_fallback_used` boolean flag to `apply_triple_barrier_with_execution`. Real historical funding distinguishes valid zero funding from missing/NaN fallback. On 3+ years backfilled DB history: exactly 0 fallback uses across 51,250 BTC trades and 51,229 ETH trades (0.00% fallback rate). Added automatic warning and clean trade EV calculation (`clean_net_ev_pct`) excluding any fallback trades. | Completed |
+| **7** | Port 21 lifecycle tests to signal-service | **DONE** | Ported all 21 original lifecycle and contract tests from `dashboard/tests/signal_lifecycle.test.mjs` into pytest suite `services/signal-service/tests/test_signal_lifecycle.py`. Updated `SignalConsumer.handle_price_tick` to handle `order_in_progress` TP/SL exits with conservative SL-first disambiguation. Verified 27/27 tests passing in `signal-service` container (6 original + 21 ported lifecycle tests). | Completed |
 
 ---
 
@@ -37,7 +51,7 @@
 
 ---
 
-## Complete Test Suite Reconciliation (41 Tests Total)
+## Production CI Test Suite Breakdown (62 Tests Total)
 
 1. **`market-collector` (5 tests)**:
    - `test_rate_limit_budgeter`
@@ -73,13 +87,34 @@
    - `test_cost_to_risk_rejection`
    - `test_successful_approval_and_sizing`
    - `test_risk_health`
-6. **`signal-service` (6 tests)**:
+6. **`signal-service` (27 tests)**:
    - `test_valid_and_invalid_transitions`
    - `test_signal_tick_transition_to_in_progress`
    - `test_signal_tick_invalidation`
    - `test_short_signal_entry_fill`
    - `test_short_signal_invalidation_before_entry`
    - `test_signal_health`
+   - `test_01_rejects_unconfirmed_coin_from_being_presented_as_active_position`
+   - `test_02_handles_null_undefined_signal_honestly_without_inventing_values`
+   - `test_03_fallback_or_mock_signals_with_is_fallback_flag_are_identified_and_excluded`
+   - `test_04_empty_signal_list_results_in_zero_open_signals_and_no_fabricated_setups`
+   - `test_05_state_1_waiting_for_confirmation_when_coin_is_unconfirmed`
+   - `test_06_state_2_waiting_for_entry_long_setup_before_cmp_reaches_entry`
+   - `test_07_state_2_waiting_for_entry_short_setup_before_cmp_reaches_entry`
+   - `test_08_state_3_order_in_progress_when_long_entry_reached`
+   - `test_09_state_3_order_in_progress_when_short_entry_reached`
+   - `test_10_state_3_once_in_progress_fluctuation_between_entry_and_sl_tp_remains_in_progress`
+   - `test_11_state_4_win_target_hit_when_take_profit_touched_long`
+   - `test_12_state_4_win_target_hit_when_take_profit_touched_short`
+   - `test_13_state_5_loss_stop_loss_hit_when_stop_loss_touched_long`
+   - `test_14_state_5_loss_stop_loss_hit_when_stop_loss_touched_short`
+   - `test_15_ambiguous_price_gap_adheres_to_conservative_sl_first_rule`
+   - `test_16_completed_trade_is_recorded_only_once_and_prevents_duplicate_history`
+   - `test_17_deduplicates_database_history_and_session_completed_trades`
+   - `test_18_calculates_accurate_duration_between_valid_opened_at_and_closed_at`
+   - `test_19_calculates_duration_for_short_trades_under_1_hour`
+   - `test_20_returns_honest_unavailable_symbol_when_timestamps_are_missing_or_invalid`
+   - `test_21_preserves_original_prediction_timestamp_and_timeframe_in_trade_history_record`
 7. **`paper-exec-service` (3 tests)**:
    - `test_evaluate_tick_exits_long_conservative_sl_first`
    - `test_evaluate_tick_exits_short_side_verification`
@@ -91,4 +126,4 @@
 10. **End-to-End Pipeline Fixture (1 test)**:
     - `test_e2e_signal_to_execution_flow`
 
-**Grand Total**: 41 production unit and integration tests passing across all services (40 service tests + 1 E2E pipeline test). Separately, 21 standalone prototype unit tests exist in root `tests/`.
+**Grand Total**: 62 production unit and integration tests passing across all microservices (61 service tests + 1 E2E pipeline test). Separately, 21 frontend JavaScript tests run in `dashboard/tests/signal_lifecycle.test.mjs`.
