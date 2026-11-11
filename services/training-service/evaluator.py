@@ -6,6 +6,8 @@ and rigorous Sharpe ratio audit (per-trade frequency vs period annualization).
 from dataclasses import dataclass, field
 import logging
 import os
+from pathlib import Path
+import re
 from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -77,12 +79,11 @@ def derive_breakeven_probability_gate(
 
 
 def get_dsr_trial_count(
-    n_hyperparams: int = 5,
-    n_threshold_combos: int = 20,
-    default_trials: int = 100,
+    experiments_file: str = "docs/EXPERIMENTS.md",
+    default_trials: int = 208,
 ) -> Tuple[int, str]:
     """
-    Returns configurable DSR trial count and logs its exact derivation.
+    Returns DSR trial count dynamically derived from docs/EXPERIMENTS.md registry.
     Configurable via DSR_TRIALS environment variable.
     """
     env_val = os.getenv("DSR_TRIALS")
@@ -94,12 +95,23 @@ def get_dsr_trial_count(
             return trials, derivation
         except ValueError:
             pass
-    derived = n_hyperparams * n_threshold_combos
-    trials = max(derived, default_trials)
-    derivation = (
-        f"Derived from search space: {n_hyperparams} hyperparam grids * "
-        f"{n_threshold_combos} threshold combos = {derived} trials (floored at default {default_trials})"
-    )
+
+    # Check for docs/EXPERIMENTS.md in standard paths
+    for p in [Path(experiments_file), Path("../../" + experiments_file), Path("/app/" + experiments_file)]:
+        if p.exists():
+            try:
+                content = p.read_text(encoding="utf-8")
+                match = re.search(r"Total Registered Trials[^\n]*\*\*(\d+)\*\*", content)
+                if match:
+                    trials = int(match.group(1))
+                    derivation = f"Dynamically derived from {p.name}: {trials} total registered trials"
+                    log.info(derivation)
+                    return trials, derivation
+            except Exception as e:
+                log.warning("Could not parse %s for DSR trials: %s", p, e)
+
+    trials = default_trials
+    derivation = f"Standard registry count from docs/EXPERIMENTS.md: {trials} trials"
     log.info("DSR trial count derivation: %s (trials=%d)", derivation, trials)
     return trials, derivation
 
