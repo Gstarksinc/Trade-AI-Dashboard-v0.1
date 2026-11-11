@@ -17,7 +17,9 @@ Implements:
 
 from datetime import datetime, timezone
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import joblib
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
@@ -303,38 +305,59 @@ def run_full_leakage_audit(
     # (d) Top feature importances
     top_features = compute_feature_importances(X_train, y_train, w_train)
 
-    # Fit calibrated primary classifier on training set
-    base_lgbm = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, random_state=42, verbose=-1)
-    calibrated_primary = CalibratedClassifierCV(estimator=base_lgbm, method="sigmoid", cv=purged_cv)
-    calibrated_primary.fit(X_train, y_train, sample_weight=w_train)
+    # Determinism: Fixed seed and canonical persisted model artifact per symbol/timeframe
+    np.random.seed(42)
+    canonical_bundle_path = Path("artifacts/models") / f"{symbol}_{timeframe}_canonical.joblib"
+    if canonical_bundle_path.exists():
+        log.info("Loading persisted canonical model bundle from %s for identical evaluation", canonical_bundle_path)
+        bundle = joblib.load(canonical_bundle_path)
+        calibrated_primary = bundle["primary_model"]
+        meta_clf = bundle["meta_model"]
+        best_p = bundle["thresholds"]["prob_threshold"]
+        best_m = bundle["thresholds"]["meta_threshold"]
+        p_star = bundle["thresholds"]["p_star"]
+    else:
+        log.info("Training and persisting canonical model bundle for %s %s...", symbol, timeframe)
+        # Fit calibrated primary classifier on training set
+        base_lgbm = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, random_state=42, verbose=-1)
+        calibrated_primary = CalibratedClassifierCV(estimator=base_lgbm, method="sigmoid", cv=purged_cv)
+        calibrated_primary.fit(X_train, y_train, sample_weight=w_train)
 
-    # Fit meta-labeler on out-of-fold primary predictions
-    oof_primary_preds = np.zeros(len(X_train))
-    for tr, te in purged_cv.split(X_train):
-        f_clf = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, random_state=42, verbose=-1)
-        f_clf.fit(X_train.iloc[tr], y_train.iloc[tr], sample_weight=w_train.iloc[tr])
-        oof_primary_preds[te] = f_clf.predict_proba(X_train.iloc[te])[:, 1]
+        # Fit meta-labeler on out-of-fold primary predictions
+        oof_primary_preds = np.zeros(len(X_train))
+        for tr, te in purged_cv.split(X_train):
+            f_clf = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, random_state=42, verbose=-1)
+            f_clf.fit(X_train.iloc[tr], y_train.iloc[tr], sample_weight=w_train.iloc[tr])
+            oof_primary_preds[te] = f_clf.predict_proba(X_train.iloc[te])[:, 1]
 
-    X_tr_meta = X_train.copy()
-    X_tr_meta["primary_prob"] = oof_primary_preds
-    X_tr_meta["primary_conf"] = np.abs(oof_primary_preds - 0.5)
+        X_tr_meta = X_train.copy()
+        X_tr_meta["primary_prob"] = oof_primary_preds
+        X_tr_meta["primary_conf"] = np.abs(oof_primary_preds - 0.5)
 
-    meta_y_train = (net_returns[:train_end] > 0.0) & cost_gate_flags[:train_end] & filled_flags[:train_end]
-    meta_clf = RandomForestClassifier(n_estimators=80, max_depth=4, random_state=42)
-    meta_clf.fit(X_tr_meta, meta_y_train.astype(int))
-    meta_oof_probs = meta_clf.predict_proba(X_tr_meta)[:, 1]
+        meta_y_train = (net_returns[:train_end] > 0.0) & cost_gate_flags[:train_end] & filled_flags[:train_end]
+        meta_clf = RandomForestClassifier(n_estimators=80, max_depth=4, random_state=42)
+        meta_clf.fit(X_tr_meta, meta_y_train.astype(int))
+        meta_oof_probs = meta_clf.predict_proba(X_tr_meta)[:, 1]
 
-    # Inner-fold threshold selection (using mathematical break-even gate p*)
-    p_star = derive_breakeven_probability_gate(pt_multiplier=2.0, sl_multiplier=1.0, friction=0.0014, avg_sl_pct=0.015)
-    best_p, best_m, _ = select_thresholds_inner_fold(
-        primary_probs=oof_primary_preds,
-        meta_probs=meta_oof_probs,
-        net_returns=net_returns[:train_end],
-        is_filled=filled_flags[:train_end],
-        cost_gate_passed=cost_gate_flags[:train_end],
-        p_star=p_star,
-        min_trades=15,
-    )
+        # Inner-fold threshold selection (using mathematical break-even gate p*)
+        p_star = derive_breakeven_probability_gate(pt_multiplier=2.0, sl_multiplier=1.0, friction=0.0014, avg_sl_pct=0.015)
+        best_p, best_m, _ = select_thresholds_inner_fold(
+            primary_probs=oof_primary_preds,
+            meta_probs=meta_oof_probs,
+            net_returns=net_returns[:train_end],
+            is_filled=filled_flags[:train_end],
+            cost_gate_passed=cost_gate_flags[:train_end],
+            p_star=p_star,
+            min_trades=15,
+        )
+        canonical_bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump({
+            "primary_model": calibrated_primary,
+            "meta_model": meta_clf,
+            "thresholds": {"prob_threshold": best_p, "meta_threshold": best_m, "p_star": p_star},
+            "symbol": symbol,
+            "timeframe": timeframe,
+        }, canonical_bundle_path)
 
     # Out-of-sample inference on holdout
     holdout_primary_probs = calibrated_primary.predict_proba(X_holdout)[:, 1]

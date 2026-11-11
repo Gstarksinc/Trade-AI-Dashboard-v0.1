@@ -408,6 +408,24 @@ class ModelTrainer:
         joblib.dump(rf_meta, m_path)
         joblib.dump(feature_cols, f_path)
 
+        # Persist canonical model artifact per symbol/timeframe used by both batch_runner & leakage_audit
+        canonical_path = self.artifacts_dir / f"{symbol}_{timeframe}_canonical.joblib"
+        canonical_bundle = {
+            "primary_model": calibrated_primary,
+            "meta_model": rf_meta,
+            "feature_cols": feature_cols,
+            "thresholds": {
+                "prob_threshold": best_p,
+                "meta_threshold": best_m,
+                "p_star": p_star,
+            },
+            "version": version,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "eval_result": eval_result,
+        }
+        joblib.dump(canonical_bundle, canonical_path)
+
         p_hash = compute_sha256(p_path)
         m_hash = compute_sha256(m_path)
         f_hash = compute_sha256(f_path)
