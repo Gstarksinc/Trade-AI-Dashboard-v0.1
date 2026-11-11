@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
+from scipy.stats import rankdata
 from lightgbm import LGBMClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
@@ -30,6 +31,7 @@ try:
         select_thresholds_inner_fold,
         derive_breakeven_probability_gate,
         run_unified_evaluation,
+        run_cpcv_pbo_pipeline,
         evaluate_promotion_gates,
         compare_candidate_vs_champion_holdout,
         get_dsr_trial_count,
@@ -49,6 +51,7 @@ except (ImportError, ValueError):
         select_thresholds_inner_fold,
         derive_breakeven_probability_gate,
         run_unified_evaluation,
+        run_cpcv_pbo_pipeline,
         evaluate_promotion_gates,
         compare_candidate_vs_champion_holdout,
         get_dsr_trial_count,
@@ -272,91 +275,24 @@ class ModelTrainer:
         )
 
         # 6. Combinatorial Purged CV (CPCV) Path Distribution & Multi-Trial PBO
-        cpcv = CombinatorialPurgedCV(n_groups=5, k_test_groups=2, max_holding_bars=max_holding_bars)
-        cpcv_sharpes = []
-        cpcv_pfs = []
-        cpcv_mdds = []
-        cpcv_trade_counts = []
-        cpcv_ranks = []
-
-        prob_candidates = [
-            round(p_star, 4),
-            round(p_star + 0.01, 4),
-            round(p_star + 0.02, 4),
-            round(p_star + 0.03, 4),
-            round(p_star + 0.04, 4),
-        ]
-        meta_candidates = [0.25, 0.28, 0.30, 0.35, 0.40, 0.50]
-        candidate_grid = [(p, m) for p in prob_candidates for m in meta_candidates]
-        bars_per_day = 24.0 if timeframe == "1h" else 6.0
-
-        for c_tr_idx, c_te_idx in cpcv.split(starts_tr, ends_tr):
-            if len(c_te_idx) == 0:
-                continue
-
-            path_years = max(0.1, (len(c_te_idx) / bars_per_day) / 365.25)
-
-            # Strategy's actual executed trades on this path
-            path_mask = (
-                (oof_primary_probs[c_te_idx] >= best_p)
-                & (meta_oof_probs[c_te_idx] >= best_m)
-                & is_filled[:train_end_idx][c_te_idx]
-                & cost_gate_passed[:train_end_idx][c_te_idx]
-            )
-            path_trades = net_returns[:train_end_idx][c_te_idx][path_mask]
-            path_trades = path_trades[~np.isnan(path_trades)]
-            n_path_trades = len(path_trades)
-            cpcv_trade_counts.append(n_path_trades)
-
-            if n_path_trades >= 2:
-                mean_r = float(np.mean(path_trades))
-                std_r = float(np.std(path_trades))
-                trade_sharpe = (mean_r / std_r) if std_r > 0 else 0.0
-                trades_per_year = n_path_trades / path_years
-                ann_sr = trade_sharpe * np.sqrt(trades_per_year)
-
-                cpcv_sharpes.append(float(round(ann_sr, 3)))
-                cpcv_mdds.append(float(round(compute_max_drawdown(path_trades), 4)))
-                pos = path_trades[path_trades > 0]
-                neg = abs(path_trades[path_trades < 0])
-                pf = float(np.sum(pos) / np.sum(neg)) if np.sum(neg) > 0 else (1.5 if len(pos) > 0 else 0.0)
-                cpcv_pfs.append(float(round(pf, 3)))
-            elif n_path_trades == 1:
-                cpcv_sharpes.append(0.0)
-                cpcv_mdds.append(float(round(abs(min(0.0, float(path_trades[0]))), 4)))
-                cpcv_pfs.append(1.0 if path_trades[0] >= 0 else 0.0)
-            else:
-                cpcv_sharpes.append(0.0)
-                cpcv_mdds.append(0.0)
-                cpcv_pfs.append(1.0)
-
-            # Multi-trial PBO (Marcos López de Prado CSCV):
-            # Evaluate all candidate configs in-sample (c_tr_idx) vs out-of-sample (c_te_idx)
-            is_evs = []
-            oos_evs = []
-            for cand_p, cand_m in candidate_grid:
-                m_is = (
-                    (oof_primary_probs[c_tr_idx] >= cand_p)
-                    & (meta_oof_probs[c_tr_idx] >= cand_m)
-                    & is_filled[:train_end_idx][c_tr_idx]
-                    & cost_gate_passed[:train_end_idx][c_tr_idx]
-                )
-                m_oos = (
-                    (oof_primary_probs[c_te_idx] >= cand_p)
-                    & (meta_oof_probs[c_te_idx] >= cand_m)
-                    & is_filled[:train_end_idx][c_te_idx]
-                    & cost_gate_passed[:train_end_idx][c_te_idx]
-                )
-                is_r = net_returns[:train_end_idx][c_tr_idx][m_is]
-                oos_r = net_returns[:train_end_idx][c_te_idx][m_oos]
-                is_evs.append(float(np.mean(is_r)) if len(is_r) >= 5 else -999.0)
-                oos_evs.append(float(np.mean(oos_r)) if len(oos_r) >= 2 else -999.0)
-
-            best_is_idx = int(np.argmax(is_evs))
-            sorted_oos = np.argsort(oos_evs)
-            rank_in_oos = int(np.where(sorted_oos == best_is_idx)[0][0]) + 1
-            rel_rank = rank_in_oos / (len(candidate_grid) + 1.0)
-            cpcv_ranks.append(rel_rank)
+        # Configuration matrix: M configurations (30) x S combinations (10)
+        cpcv_res = run_cpcv_pbo_pipeline(
+            oof_primary_probs=oof_primary_probs,
+            meta_oof_probs=meta_oof_probs,
+            net_returns=net_returns[:train_end_idx],
+            is_filled=is_filled[:train_end_idx],
+            cost_gate_passed=cost_gate_passed[:train_end_idx],
+            starts_tr=starts_tr,
+            ends_tr=ends_tr,
+            p_star=p_star,
+            timeframe=timeframe,
+            max_holding_bars=max_holding_bars,
+        )
+        cpcv_sharpes = cpcv_res["cpcv_sharpes"]
+        cpcv_ranks = cpcv_res["cpcv_ranks"]
+        cpcv_paths_details = cpcv_res["cpcv_paths_details"]
+        cpcv_pfs = cpcv_res["cpcv_pfs"]
+        cpcv_mdds = cpcv_res["cpcv_mdds"]
 
         # 7. Evaluate on Final Untouched Holdout Set using Unified Evaluation Function
         holdout_primary_probs = calibrated_primary.predict_proba(X_holdout)[:, 1]
@@ -469,10 +405,12 @@ class ModelTrainer:
             },
             "cpcv_distributions": {
                 "sharpe": {
-                    "min": float(np.min(cpcv_sharpes)) if cpcv_sharpes else 0.0,
-                    "median": float(np.median(cpcv_sharpes)) if cpcv_sharpes else -1.0,
-                    "max": float(np.max(cpcv_sharpes)) if cpcv_sharpes else 0.0,
-                    "paths_count": len(cpcv_sharpes),
+                    "min": float(np.min(cpcv_sharpes)) if cpcv_sharpes else "insufficient",
+                    "median": float(np.median(cpcv_sharpes)) if cpcv_sharpes else "insufficient",
+                    "max": float(np.max(cpcv_sharpes)) if cpcv_sharpes else "insufficient",
+                    "paths_count": len(cpcv_paths_details),
+                    "valid_paths_count": len(cpcv_sharpes),
+                    "insufficient_paths_count": len(cpcv_paths_details) - len(cpcv_sharpes),
                 },
                 "profit_factor": {
                     "median": float(np.median(cpcv_pfs)) if cpcv_pfs else 1.0,
@@ -480,6 +418,7 @@ class ModelTrainer:
                 "max_drawdown": {
                     "median": float(np.median(cpcv_mdds)) if cpcv_mdds else 0.0,
                 },
+                "paths": cpcv_paths_details,
             },
             "reliability_curve": cal_out["reliability_curve"],
             "drift_report": drift_report,

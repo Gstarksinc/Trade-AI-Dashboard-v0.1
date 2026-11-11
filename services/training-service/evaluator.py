@@ -11,7 +11,12 @@ import re
 from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
+from scipy.stats import norm, rankdata
+
+try:
+    from .cross_validation import CombinatorialPurgedCV
+except (ImportError, ValueError):
+    from cross_validation import CombinatorialPurgedCV
 
 log = logging.getLogger("training-service.evaluator")
 
@@ -184,7 +189,7 @@ def compute_deflated_sharpe_ratio(
 
 
 def compute_pbo(
-    cpcv_path_sharpes: List[float],
+    cpcv_path_sharpes: List[any],
     candidate_ranks: Optional[List[float]] = None,
 ) -> float:
     """
@@ -199,9 +204,10 @@ def compute_pbo(
         arr_ranks = np.array(candidate_ranks)
         pbo = float(np.mean(arr_ranks <= 0.5))
         return float(round(pbo, 4))
-    if not cpcv_path_sharpes:
+    valid_sharpes = [s for s in cpcv_path_sharpes if isinstance(s, (int, float)) and not np.isnan(s)]
+    if not valid_sharpes:
         return 0.5
-    arr = np.array(cpcv_path_sharpes)
+    arr = np.array(valid_sharpes)
     pbo = float(np.mean(arr <= 0.0))
     return float(round(pbo, 4))
 
@@ -265,6 +271,150 @@ def optimize_thresholds_inner_fold(
         p_star=p_star,
         min_trades=min_trades,
     )
+
+
+def run_cpcv_pbo_pipeline(
+    oof_primary_probs: np.ndarray,
+    meta_oof_probs: np.ndarray,
+    net_returns: np.ndarray,
+    is_filled: np.ndarray,
+    cost_gate_passed: np.ndarray,
+    starts_tr: pd.Series,
+    ends_tr: pd.Series,
+    p_star: float,
+    timeframe: str,
+    max_holding_bars: int = 24,
+) -> Dict[str, any]:
+    """
+    Executes Combinatorial Purged Cross-Validation (CPCV) and Multi-Trial PBO (CSCV).
+    
+    Item 2 & 3 Compliance:
+    - Matrix size: M configurations (30) x S combinations (10)
+    - Combinations: C(5, 2) = 10 paths
+    - Thresholds are selected INSIDE each path's training split only.
+    - Paths with < 30 trades report "insufficient", not a Sharpe.
+    """
+    cpcv = CombinatorialPurgedCV(n_groups=5, k_test_groups=2, max_holding_bars=max_holding_bars)
+    cpcv_sharpes = []
+    cpcv_pfs = []
+    cpcv_mdds = []
+    cpcv_trade_counts = []
+    cpcv_paths_details = []
+    cpcv_ranks = []
+
+    prob_candidates = [
+        round(p_star, 4),
+        round(p_star + 0.01, 4),
+        round(p_star + 0.02, 4),
+        round(p_star + 0.03, 4),
+        round(p_star + 0.04, 4),
+    ]
+    meta_candidates = [0.25, 0.28, 0.30, 0.35, 0.40, 0.50]
+    candidate_grid = [(p, m) for p in prob_candidates for m in meta_candidates]
+    bars_per_day = 24.0 if timeframe == "1h" else 6.0
+
+    for path_idx, (c_tr_idx, c_te_idx) in enumerate(cpcv.split(starts_tr, ends_tr)):
+        if len(c_te_idx) == 0:
+            continue
+
+        path_years = max(0.1, (len(c_te_idx) / bars_per_day) / 365.25)
+
+        # Phase 6.8 Item 2: Thresholds selected strictly inside this path's training split c_tr_idx only
+        path_best_p, path_best_m, _ = select_thresholds_inner_fold(
+            primary_probs=oof_primary_probs[c_tr_idx],
+            meta_probs=meta_oof_probs[c_tr_idx],
+            net_returns=net_returns[c_tr_idx],
+            is_filled=is_filled[c_tr_idx],
+            cost_gate_passed=cost_gate_passed[c_tr_idx],
+            p_star=p_star,
+            min_trades=15,
+        )
+
+        # Strategy executed trades on out-of-sample path c_te_idx using that path's thresholds
+        path_mask = (
+            (oof_primary_probs[c_te_idx] >= path_best_p)
+            & (meta_oof_probs[c_te_idx] >= path_best_m)
+            & is_filled[c_te_idx]
+            & cost_gate_passed[c_te_idx]
+        )
+        path_trades = net_returns[c_te_idx][path_mask]
+        path_trades = path_trades[~np.isnan(path_trades)]
+        n_path_trades = len(path_trades)
+        cpcv_trade_counts.append(n_path_trades)
+
+        mean_r = float(np.mean(path_trades)) if n_path_trades > 0 else 0.0
+        std_r = float(np.std(path_trades)) if n_path_trades > 1 else 0.0
+
+        # Phase 6.8 Item 2: Path with < 30 trades reported as "insufficient", not as a Sharpe
+        if n_path_trades >= 30:
+            trade_sharpe = (mean_r / std_r) if std_r > 0 else 0.0
+            trades_per_year = n_path_trades / path_years
+            ann_sr = trade_sharpe * np.sqrt(trades_per_year)
+            path_sharpe_val = float(round(ann_sr, 3))
+            cpcv_sharpes.append(path_sharpe_val)
+            pos = path_trades[path_trades > 0]
+            neg = abs(path_trades[path_trades < 0])
+            pf = float(np.sum(pos) / np.sum(neg)) if np.sum(neg) > 0 else (1.5 if len(pos) > 0 else 0.0)
+            cpcv_pfs.append(float(round(pf, 3)))
+            cpcv_mdds.append(float(round(compute_max_drawdown(path_trades), 4)))
+        else:
+            path_sharpe_val = "insufficient"
+
+        cpcv_paths_details.append({
+            "path_id": path_idx + 1,
+            "n_trades": n_path_trades,
+            "mean_return": round(mean_r, 6),
+            "std_return": round(std_r, 6),
+            "thresholds_used": {
+                "prob_threshold": round(float(path_best_p), 4),
+                "meta_threshold": round(float(path_best_m), 4),
+            },
+            "sharpe": path_sharpe_val,
+            "status": "valid" if n_path_trades >= 30 else "insufficient",
+        })
+
+        # Multi-trial PBO (Marcos López de Prado CSCV):
+        # Matrix size: M configurations (30) x S combinations (10)
+        is_evs = []
+        oos_evs = []
+        for cand_p, cand_m in candidate_grid:
+            m_is = (
+                (oof_primary_probs[c_tr_idx] >= cand_p)
+                & (meta_oof_probs[c_tr_idx] >= cand_m)
+                & is_filled[c_tr_idx]
+                & cost_gate_passed[c_tr_idx]
+            )
+            m_oos = (
+                (oof_primary_probs[c_te_idx] >= cand_p)
+                & (meta_oof_probs[c_te_idx] >= cand_m)
+                & is_filled[c_te_idx]
+                & cost_gate_passed[c_te_idx]
+            )
+            is_r = net_returns[c_tr_idx][m_is]
+            oos_r = net_returns[c_te_idx][m_oos]
+            is_evs.append(float(np.mean(is_r)) if len(is_r) >= 5 else -999.0)
+            oos_evs.append(float(np.mean(oos_r)) if len(oos_r) >= 2 else -999.0)
+
+        best_is_idx = int(np.argmax(is_evs))
+        ranks_oos = rankdata(oos_evs, method="average")
+        rel_rank = float(ranks_oos[best_is_idx] / (len(candidate_grid) + 1.0))
+        cpcv_ranks.append(rel_rank)
+
+    pbo = compute_pbo(cpcv_sharpes, candidate_ranks=cpcv_ranks)
+    median_cpcv_sharpe = float(np.median(cpcv_sharpes)) if cpcv_sharpes else "insufficient"
+
+    return {
+        "cpcv_sharpes": cpcv_sharpes,
+        "median_cpcv_sharpe": median_cpcv_sharpe,
+        "pbo": pbo,
+        "cpcv_pfs": cpcv_pfs,
+        "cpcv_mdds": cpcv_mdds,
+        "cpcv_trade_counts": cpcv_trade_counts,
+        "cpcv_paths_details": cpcv_paths_details,
+        "cpcv_ranks": cpcv_ranks,
+        "candidate_grid": candidate_grid,
+        "matrix_shape": (len(candidate_grid), len(cpcv_paths_details)),
+    }
 
 
 def run_unified_evaluation(
@@ -492,7 +642,7 @@ def run_unified_evaluation(
 def evaluate_promotion_gates(
     holdout_net_returns: np.ndarray,
     ece: float,
-    cpcv_sharpes: List[float],
+    cpcv_sharpes: List[any],
     min_trades: int = 50,
     max_ece: float = 0.12,
 ) -> Tuple[bool, Dict[str, any]]:
@@ -502,18 +652,24 @@ def evaluate_promotion_gates(
     2. Bootstrap 95% CI lower bound of Net EV > 0.
     3. Trade count >= min_trades.
     4. ECE <= max_ece (0.12).
-    5. Median CPCV path net Sharpe > 0.
+    5. Median CPCV path net Sharpe > 0 (requires sufficient paths with >= 30 trades).
     """
     n_trades = len(holdout_net_returns)
     mean_ev, ev_lower, ev_upper = bootstrap_ci(holdout_net_returns, np.mean, n_bootstraps=1000)
-    median_cpcv_sharpe = float(np.median(cpcv_sharpes)) if cpcv_sharpes else -1.0
+    valid_sharpes = [s for s in cpcv_sharpes if isinstance(s, (int, float)) and not np.isnan(s)]
+    if valid_sharpes:
+        median_cpcv_sharpe = float(np.median(valid_sharpes))
+        gate_cpcv_sharpe_passed = median_cpcv_sharpe > 0.0
+    else:
+        median_cpcv_sharpe = "insufficient"
+        gate_cpcv_sharpe_passed = False
 
     gates = {
         "gate_min_trades_passed": n_trades >= min_trades,
         "gate_net_ev_passed": mean_ev > 0.0,
         "gate_bootstrap_ci_passed": ev_lower > 0.0,
         "gate_ece_passed": ece <= max_ece,
-        "gate_cpcv_sharpe_passed": median_cpcv_sharpe > 0.0,
+        "gate_cpcv_sharpe_passed": gate_cpcv_sharpe_passed,
     }
 
     all_passed = all(gates.values())
@@ -522,7 +678,7 @@ def evaluate_promotion_gates(
         "mean_net_ev_pct": round(mean_ev * 100.0, 3),
         "bootstrap_ci_95": [round(ev_lower * 100.0, 3), round(ev_upper * 100.0, 3)],
         "ece": round(ece, 4),
-        "median_cpcv_sharpe": round(median_cpcv_sharpe, 3),
+        "median_cpcv_sharpe": round(median_cpcv_sharpe, 3) if isinstance(median_cpcv_sharpe, (int, float)) else "insufficient",
         "gates": gates,
         "promotion_approved": all_passed,
     }
