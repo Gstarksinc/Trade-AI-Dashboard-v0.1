@@ -584,6 +584,25 @@ def run_unified_evaluation(
                 "count": cnt,
             })
 
+    # Primary model holdout AUC and bootstrap CI
+    try:
+        from sklearn.metrics import roc_auc_score
+        auc_val = float(roc_auc_score(y_holdout, holdout_primary_probs))
+        rng = np.random.default_rng(42)
+        n_samples = len(y_holdout)
+        boot_aucs = []
+        for _ in range(500):
+            b_idx = rng.choice(n_samples, size=n_samples, replace=True)
+            if len(np.unique(y_holdout[b_idx])) >= 2:
+                boot_aucs.append(roc_auc_score(y_holdout[b_idx], holdout_primary_probs[b_idx]))
+        if boot_aucs:
+            auc_ci_95 = [round(float(np.percentile(boot_aucs, 2.5)), 4), round(float(np.percentile(boot_aucs, 97.5)), 4)]
+        else:
+            auc_ci_95 = [round(auc_val, 4), round(auc_val, 4)]
+    except Exception:
+        auc_val = 0.5
+        auc_ci_95 = [0.5, 0.5]
+
     # Strict Promotion Gates
     cpcv_list = cpcv_sharpes or []
     median_cpcv_sharpe = float(np.median(cpcv_list)) if cpcv_list else -1.0
@@ -661,6 +680,8 @@ def run_unified_evaluation(
         "calibration": {
             "ece": round(ece, 4),
             "mce": round(mce, 4),
+            "auc": round(auc_val, 4),
+            "auc_ci_95": auc_ci_95,
             "reliability_curve": reliability_curve,
         },
         "overfitting": {

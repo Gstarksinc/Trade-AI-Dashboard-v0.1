@@ -262,8 +262,20 @@ async def generate_experiments_md_from_db(output_file: str = "docs/EXPERIMENTS.m
         "",
     ])
 
-    md_path.write_text("\n".join(lines), encoding="utf-8")
-    log.info("Successfully generated %s from DB with %d trials.", output_file, total_trials)
+    content = "\n".join(lines)
+    candidate_paths = [Path("/app/docs/EXPERIMENTS.md"), Path("../../docs/EXPERIMENTS.md"), Path("docs/EXPERIMENTS.md")]
+    written = False
+    for p in candidate_paths:
+        if p.parent.exists() and "services" not in p.resolve().parts:
+            p.write_text(content, encoding="utf-8")
+            log.info("Successfully generated %s from DB with %d trials.", p, total_trials)
+            written = True
+            break
+    if not written:
+        md_path = Path(output_file)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(content, encoding="utf-8")
+        log.info("Successfully generated %s from DB with %d trials.", md_path, total_trials)
     return total_trials
 
 

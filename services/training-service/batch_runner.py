@@ -65,7 +65,9 @@ async def run_batch_evaluation(symbols: List[str] = None, timeframes: List[str] 
     # Pre-fetch BTC reference candles for cross-asset correlations
     btc_candles = {}
     for tf in timeframes:
-        btc_df = await fetch_binance_klines("BTCUSDT", tf, limit=1500)
+        btc_df, _ = await trainer.load_training_data("BTCUSDT", tf, limit=None)
+        if btc_df.empty or len(btc_df) < 300:
+            btc_df = await fetch_binance_klines("BTCUSDT", tf, limit=1500)
         btc_candles[tf] = btc_df
 
     for symbol in symbols:
@@ -119,7 +121,11 @@ async def run_batch_evaluation(symbols: List[str] = None, timeframes: List[str] 
                     "per_trade_sharpe": holdout.get("per_trade_sharpe", 0.0),
                     "trades_per_year": holdout.get("trades_per_year", 0.0),
                     "median_cpcv_sharpe": cpcv["sharpe"]["median"],
+                    "cpcv_valid_paths": cpcv["sharpe"].get("valid_paths_count", 0),
+                    "cpcv_total_paths": cpcv["sharpe"].get("paths_count", 10),
                     "ece": holdout["ece"],
+                    "auc": holdout.get("auc", 0.5),
+                    "auc_ci_95": holdout.get("auc_ci_95", [0.5, 0.5]),
                     "dsr": holdout["deflated_sharpe_ratio"],
                     "pbo": holdout["pbo"],
                     "promotion_approved": pipeline_out["promotion_approved"],
@@ -145,18 +151,27 @@ async def run_batch_evaluation(symbols: List[str] = None, timeframes: List[str] 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    out = asyncio.run(run_batch_evaluation(symbols=["BTCUSDT", "ETHUSDT"], timeframes=["1h", "4h"]))
-    print("\n" + "=" * 80)
-    print("PHASE 3.1 BATCH RUNNER RESULTS (BTC & ETH 1h/4h ON FULL HISTORY)")
-    print("=" * 80)
+    # All 8 symbols across 1h and 4h
+    symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "LINKUSDT", "TRXUSDT"]
+    timeframes = ["1h", "4h"]
+    out = asyncio.run(run_batch_evaluation(symbols=symbols, timeframes=timeframes))
+    
+    print("\n" + "=" * 120)
+    print("PHASE 6.8 ITEM 4: FINAL EVALUATION TABLE (ALL 8 SYMBOLS x 1h/4h ON FULL HISTORY)")
+    print("=" * 120)
+    print("| Symbol | TF | Bars | Inner Thresh (p*, prob, meta) | Holdout Trades | Net EV% (95% CI) | CPCV Med Sharpe (valid/10) | PBO | DSR (208 trials) | Primary AUC (95% CI) | Promotion Gate |")
+    print("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
     for r in out["results"]:
-        print(f"\nModel: {r['symbol']} ({r['timeframe']}) - {r['version']}")
-        print(f"  Total Bars: {r['total_bars']}, Fill Rate: {r['fill_rate']}, Gate Pass Rate: {r['gate_pass_rate']}")
-        print(f"  Thresholds Selected in Inner Folds: prob={r['thresholds'].get('prob_threshold')} (p*={r['thresholds'].get('p_star_breakeven')}), meta={r['thresholds'].get('meta_threshold')}")
-        print(f"  Funnel: candidate={r['funnel'].get('candidate_bars')} -> prob={r['funnel'].get('prob_gate_passed')} -> meta={r['funnel'].get('meta_gate_passed')} -> cost={r['funnel'].get('cost_gate_passed')} -> limit_fill={r['funnel'].get('limit_fill_passed')}")
-        print(f"  Holdout Trades: {r['holdout_trades']}, Net EV: {r['holdout_net_ev_pct']}%, 95% CI: {r['bootstrap_ci_95']}%")
-        print(f"  Annualized Sharpe: {r['holdout_sharpe']} (per-trade: {r['per_trade_sharpe']}, trades/year: {r['trades_per_year']}), Median CPCV Sharpe: {r['median_cpcv_sharpe']}")
-        print(f"  ECE: {r['ece']}, DSR: {r['dsr']}, PBO: {r['pbo']}")
-        print(f"  Promotion Approved: {r['promotion_approved']}")
-        print(f"  Gates Breakdown: {r['gates_breakdown']}")
+        th = r["thresholds"]
+        th_str = f"p*={th.get('p_star_breakeven', 0.364):.3f}, p={th.get('prob_threshold', 0.5):.3f}, m={th.get('meta_threshold', 0.5):.2f}"
+        ev_str = f"{r['holdout_net_ev_pct']:.2f}% [{r['bootstrap_ci_95'][0]:.2f}%, {r['bootstrap_ci_95'][1]:.2f}%]"
+        cpcv_sh = r["median_cpcv_sharpe"]
+        cpcv_str = f"{cpcv_sh:.2f} ({r.get('cpcv_valid_paths', 0)}/10)" if isinstance(cpcv_sh, (int, float)) else f"{cpcv_sh} (0/10)"
+        pbo_str = f"{r['pbo']:.3f}" if isinstance(r["pbo"], (int, float)) else str(r["pbo"])
+        dsr_str = f"{r['dsr']:.4f}" if isinstance(r["dsr"], (int, float)) else str(r["dsr"])
+        auc_ci = r.get("auc_ci_95", [0.5, 0.5])
+        auc_str = f"{r.get('auc', 0.5):.3f} [{auc_ci[0]:.3f}, {auc_ci[1]:.3f}]"
+        gate_status = "APPROVED" if r["promotion_approved"] else "REJECTED"
+        print(f"| {r['symbol']} | {r['timeframe']} | {r['total_bars']} | {th_str} | {r['holdout_trades']} | {ev_str} | {cpcv_str} | {pbo_str} | {dsr_str} | {auc_str} | {gate_status} |")
+    print("=" * 120)
 

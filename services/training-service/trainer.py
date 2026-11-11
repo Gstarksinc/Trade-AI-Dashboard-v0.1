@@ -399,6 +399,8 @@ class ModelTrainer:
                 "holdout_max_drawdown": tp["max_drawdown_pct"],
                 "ece": cal_out["ece"],
                 "mce": cal_out["mce"],
+                "auc": cal_out.get("auc", 0.5),
+                "auc_ci_95": cal_out.get("auc_ci_95", [0.5, 0.5]),
                 "deflated_sharpe_ratio": of_out["dsr"],
                 "pbo": of_out["pbo"],
                 "sharpe_audit": sh_audit,
