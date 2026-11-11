@@ -1,4 +1,12 @@
-"""Signal Service Consumer with In-Memory Per-Symbol Index for Zero-Latency Tick Processing."""
+"""Signal Service Consumer with In-Memory Per-Symbol Index for Zero-Latency Tick Processing.
+
+Architecture Ownership (Phase 6.8 Item 9):
+- Signal-service owns pre-entry state machine (waiting_for_entry -> order_in_progress / invalidated).
+- Paper-exec-service is the SOLE OWNER of live position TP/SL exit evaluation on price ticks.
+- Signal-service subscribes to 'trade.closed' events from paper-exec-service to transition
+  signals from order_in_progress to win_target_hit or loss_stop_loss_hit, eliminating duplicate
+  tick evaluation across microservices.
+"""
 
 import asyncio
 from datetime import datetime, timezone
@@ -10,6 +18,7 @@ from libs.contracts.events import (
     SignalApprovedEvent,
     SignalStateChangedEvent,
     SignalStateChangedPayload,
+    TradeClosedEvent,
 )
 try:
     from .config import settings
@@ -156,6 +165,34 @@ class SignalConsumer:
                             active_for_sym.pop(sig_id, None)
                             await self._emit_state_change(sig_id, symbol, status, "win_target_hit", version + 1, "take_profit_hit")
 
+    async def handle_trade_closed(self, event_data: dict):
+        """
+        Subscribes to trade.closed events from paper-exec-service (sole owner of exits).
+        Synchronizes the signal ledger accordingly (win_target_hit or loss_stop_loss_hit).
+        """
+        event = TradeClosedEvent(**event_data)
+        payload = event.payload
+        sig_id = payload.signal_id
+        if not sig_id:
+            return
+
+        exit_reason = payload.exit_reason
+        new_status = "win_target_hit" if exit_reason in ("target_hit", "take_profit_hit") else "loss_stop_loss_hit"
+
+        active_for_sym = self._active_by_symbol.get(payload.symbol, {})
+        sig = active_for_sym.get(sig_id)
+        current_status = sig.get("status", "order_in_progress") if sig else "order_in_progress"
+        current_version = sig.get("version", 1) if sig else 1
+
+        success = await self.sm.transition_state(
+            sig_id, current_status, new_status, current_version, exit_reason
+        )
+        if success:
+            active_for_sym.pop(sig_id, None)
+            await self._emit_state_change(
+                sig_id, payload.symbol, current_status, new_status, current_version + 1, exit_reason
+            )
+
     async def _emit_state_change(self, sig_id: int, symbol: str, prev: str, new: str, version: int, trigger: str):
         self.transitions_count += 1
         event = SignalStateChangedEvent(
@@ -182,7 +219,10 @@ class SignalConsumer:
         task_ticks = asyncio.create_task(
             self.stream_mgr.consume_loop("price.tick", settings.consumer_group, f"{settings.consumer_name}-ticks", self.handle_price_tick)
         )
-        await asyncio.gather(task_approved, task_ticks)
+        task_closed = asyncio.create_task(
+            self.stream_mgr.consume_loop("trade.closed", settings.consumer_group, f"{settings.consumer_name}-closed", self.handle_trade_closed)
+        )
+        await asyncio.gather(task_approved, task_ticks, task_closed)
 
     def stop(self):
         self.running = False
