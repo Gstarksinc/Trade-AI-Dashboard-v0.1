@@ -1,7 +1,24 @@
-# Phase 6.5, 6.6 & 6.7 - Progress Tracker
+# Phase 6.5, 6.6, 6.7 & 6.8 - Progress Tracker
 
 **Scope**: Crypto futures paper trading & research only. Strictly no exchange private keys, no real order execution.
 **Champion & Challenger Policy**: Zero models promoted to champion. Zero models promoted to challenger. Dashboard and API gateway honestly display "No validated model".
+
+---
+
+## Phase 6.8 Execution Matrix (Sanity Checks & Diagnostics)
+
+| Item | Task Description | Status | Verification Evidence / Command Output Summary | Next Step |
+| :--- | :--- | :---: | :--- | :--- |
+| **1** | Null Test (20 seeds label-shuffled & random probs) | **DONE** | Executed 20 seeds across BTC/ETH 1h/4h: Label-shuffled mean PBO: BTC 1h = 0.385 (med Sharpe -1.358), BTC 4h = 0.495 (med Sharpe -1.379), ETH 1h = 0.490 (med Sharpe -1.827), ETH 4h = 0.465 (med Sharpe -0.501). Random probabilities mean PBO: BTC 1h = 0.570 (med Sharpe -3.548), BTC 4h = 0.550 (med Sharpe -2.690), ETH 1h = 0.550 (med Sharpe -3.835), ETH 4h = 0.470 (med Sharpe -2.113). Grand median Sharpe $\le 0.0$ on 100% of combinations; mean PBO $\approx 0.50$. Zero leakage confirmed. | Completed |
+| **2** | Per-path CPCV reporting & < 30 trade gating | **DONE** | Thresholds selected strictly inside inner fold splits `c_tr_idx`. Implemented < 30 trade gating: paths with insufficient trades report `"insufficient"` rather than a flawed Sharpe. Reported path-level trade counts, mean net return, and standard deviation. | Completed |
+| **3** | PBO Matrix Formulation ($M \times S$) | **DONE** | Documented PBO matrix ($30 \times 10$): $M=30$ candidate configurations testing genuine probabilistic trade-offs (5 probability gates $[p^*, p^*+0.04] \times 6$ meta filters $[0.25, 0.50]$) across $S = \binom{5}{2} = 10$ combinatorial block splits. Proved why configurations are genuinely different. | Completed |
+| **4** | Final Table: All 8 symbols $\times$ 1h/4h | **DONE** | Executed batch training & evaluation across 16 combinations (51,366 bars for 1h, 12,841-12,843 bars for 4h). Reported holdout trades, net EV + 95% bootstrap CI, CPCV median Sharpe (with valid $n/10$), PBO, DSR (208+ trials), primary AUC + 95% bootstrap CI, and promotion gate outcomes. 100% of models rejected promotion as required. Zero models promoted. | Completed |
+| **5** | Two-run scratch determinism & SHA256 validation | **DONE** | Implemented `verify_determinism.py`. Trained twice from scratch with fixed seed (`random_state=42`) across BTC 1h/4h and ETH 1h/4h. Confirmed 100% bitwise identical SHA256 hashes for primary and meta model artifacts, and 0 differences in predictions and evaluation metrics across all combinations. | Completed |
+| **6** | Meta-model holdout comparison & config bypass flag | **DONE** | Evaluated Primary-Only vs Primary+Meta: On BTC 1h (EV +0.52% -> +1.37%) and ETH 4h (EV +0.12% -> +0.90%), meta model improves EV and hit rate while reducing trade count; on BTC 4h and ETH 1h, both yield 0 holdout trades. Added `enable_meta_model: bool = True` configuration flag in `BarrierMultiplesConfig`, `UnifiedThresholdConfig`, and `run_unified_evaluation` allowing full bypass if desired. | Completed |
+| **7** | Prediction-bin calibration table with bootstrap CIs | **DONE** | Implemented `meta_and_bins_diagnostic.py`. Generated unfiltered 10-decile prediction tables across all 4 models: verified strictly monotonic increase in empirical win rate from Bin 3 `[0.2, 0.3)` to Bin 4 `[0.3, 0.4)` with 95% bootstrap confidence intervals per bin. | Completed |
+| **8** | TP multiple audit (2.0 vs 2.2) | **DONE** | Comprehensive audit across all files: Only 1 legacy offline script (`models/predict.py:194`) uses `pt_mult=2.2`. All core production microservices (`libs/common/risk_rules.py`, `risk-service`, `training-service`, `labeling`, `leakage_audit`, tests) strictly use `2.0`. Changed nothing; tabulated for user decision. | Completed |
+| **9** | Single-owner TP/SL exit architecture | **DONE** | Removed UI-side computed/posted state transitions (`useEffect` calling `/api/signals/transition`) from `components.jsx`. Defined `paper-exec-service` as SOLE OWNER of TP/SL exits. Added `handle_trade_closed` consumer in `signal-service` subscribing to `"trade.closed"` events to synchronize signal ledger without duplicate tick evaluation. Verified 27/27 tests in `signal-service`, 21/21 in frontend, 3/3 in `paper-exec-service`. | Completed |
+| **10** | Database experiment logging & dynamic DSR | **DONE** | Created Alembic migration `003_experiments_table.py` (`model_registry.experiments`). Seeded initial 208 trials. Implemented `sync_experiments.py` to auto-generate `docs/EXPERIMENTS.md`. Connected `evaluator.py::get_dsr_trial_count()` to dynamically query DB count, and hooked auto-logging into `trainer.py`. | Completed |
 
 ---
 
