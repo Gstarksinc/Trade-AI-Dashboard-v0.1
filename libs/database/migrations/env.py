@@ -46,6 +46,9 @@ def run_migrations_online() -> None:
         with context.begin_transaction():
             context.run_migrations()
 
+        current_rev = context.get_context().get_current_revision()
+        print(f"current revision: {current_rev}")
+
 if context.is_offline_mode():
     run_migrations_offline()
 else:
